@@ -98,10 +98,13 @@ class HNN(nn.Module):
         ], dtype=torch.float32)
 
         # Fixed weights (maj chords = 1/3, dominant 7th chords = 1/4 for balancing note count)
-        self.register_buffer('fixed_output_weights', notes_to_chord / notes_to_chord.sum(dim=1, keepdim=True))
+        fixed_output_weights = notes_to_chord / notes_to_chord.sum(dim=1, keepdim=True)
 
         with torch.no_grad():
-            self.output.weight.copy_(self.fixed_output_weights)
+            self.output.weight.copy_(fixed_output_weights)
+
+        # Ensure that fixed output weights do not update
+        self.output.weight.requires_grad = False
 
         # -- State Units (output layer softmax)
         self.state_units = torch.zeros(size=self.output_size)
@@ -161,7 +164,6 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
         # Zero fixed weight gradients
         with torch.no_grad():
             model.hidden2_from_melody.weight.grad.fill_diagonal_(0.0)
-            model.output.weight.grad[model.fixed_output_weights > 0] = 0.0
 
         # Update weights
         optimizer.step()
