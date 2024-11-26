@@ -138,15 +138,11 @@ def create_training_data(ref_chords: bool = True):
         * [A->G#] * maj, min, dim, maj7, min7, dom7, min7b5
     '''
     # -- Read chord_melody_data
-    with open('chord_melody_data.txt', 'r') as file:
+    with open('data/chord_melody_data.txt', 'r') as file:
         text = file.read()
 
     # -- Parse data into songs list of dicts
     songs = parse_data(text, ref_chords=ref_chords)
-
-    # -- Initialize empty inputs/labels arrays
-    inputs = []
-    labels = []
 
     # -- Define notes/chords one-hot size 
     num_notes = 12
@@ -158,13 +154,16 @@ def create_training_data(ref_chords: bool = True):
 
     # -- Initialize note/chord one-hot encoding arrays to index from
     note_enc_array = np.eye(num_notes, dtype=int)
+
+    # -- Initialize empty inputs/labels arrays
+    inputs_by_song = []
+    labels_by_song = []
     
     for song in songs:
-        # -- Convert corresponding notes/chords to one-hot encodings
-        notes = song['notes']
-        chords = song['chords']
+        song_inputs = []
+        song_labels = []
 
-        for note, chord in zip(notes, chords):
+        for note, chord in zip(song['notes'], song['chords']):
             # -- Map note to one-hot index
             note_idx = NOTES_REF.get(note[:2])
             # -- Obtain note one-hot encoding
@@ -177,70 +176,15 @@ def create_training_data(ref_chords: bool = True):
             chord_label = CHORDS_REF.get(chord)
 
             # -- Append notes to inputs & chords to labels
-            inputs.append(note_input)
-            labels.append(chord_label)
+            song_inputs.append(note_input)
+            song_labels.append(chord_label)
 
-    # -- Convert inputs/labels to NumPy arrays
-    inputs = np.array(inputs, dtype=np.float32)
-    labels = np.array(labels, dtype=np.int64)
+        # -- Convert song inputs/labels to tensors
+        song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
+        song_labels = torch.tensor(np.array(song_labels, dtype=np.int64))
 
-    # -- Convert to PyTorch tensors
-    inputs = torch.from_numpy(inputs)
-    labels = torch.from_numpy(labels)
+        # -- Append song's inputs/labels to full list
+        inputs_by_song.append(song_inputs)
+        labels_by_song.append(song_labels)
 
-    return inputs, labels
-
-
-# def main():
-#     with open('chord_melody_data.txt', 'r') as file:
-#         text = file.read()
-    
-#     songs = parse_data(text, ref_chords=True)
-
-#     print(len(songs))
-
-#     inputs, labels = create_training_data(songs, ref_chords=True)
-
-#     print(inputs)
-#     print(labels)
-
-
-# if __name__ == "__main__":
-#     main()
-
-
-
-
-
-
-
-# def parse_song(file: TextIOWrapper, pos):
-#     '''
-#     Reads through the encoded songs .txt file
-#     (chord_melody_data.txt) until the key changes
-
-#     Stores the melody note and corresponding chord at
-#     the 1st/3rd beats as one-hot encoded input/label pairs
-
-#     Only selects songs that use *exclusively* major/dom7 chords
-#     to properly match the reference model
-#     - Chord Types:
-#         * 0 | maj
-#         * 5 | dom7
-
-#     Parameters:
-#     - start_pos: Position in chord_melody_data.txt to begin reading from
-
-#     Returns:
-#     - inputs: Array of sequential one-hot encoded melody notes
-#     - labels: Array of sequential one-hot encoded chords
-#     - pos: File position after reading song
-#     '''
-#     # -- Iterate through each 4-bar group until a new key is reached
-#     while True:
-#         # -- Read key ([key]^)
-#         key = file.read(3)
-
-#         # -- Read 8 chords (2 per bar)
-#         chords = file.read()
-
+    return inputs_by_song, labels_by_song
