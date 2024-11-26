@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as opt
+
+import load_data
 
 '''
 -- Model Architecture --
@@ -107,7 +109,7 @@ class HNN(nn.Module):
         self.output.weight.requires_grad = False
 
         # -- State Units (output layer softmax)
-        self.state_units = torch.zeros(size=self.output_size)
+        self.state_units = torch.zeros(size=(self.output_size,))
 
     
     def forward(self, X):
@@ -138,12 +140,12 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
     total_loss = 0.0
 
     # -- Initialize state units to 0 (will update w/ outputs in loop)
-    state_units = torch.zeros(dataloader.batch_size, model.output_size)
+    state_units = torch.zeros((1, model.output_size)).to(device)
 
     # -- Iterate through DataLoader batches/song beats (melody unit inputs/chord outputs)
     for i, (inputs, labels) in enumerate(dataloader):
         # Define meter_units based on batch index
-        meter_units = F.one_hot(torch.arange(2, dtype=torch.float32))[i % 2].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+        meter_units = F.one_hot(torch.arange(2, dtype=torch.long))[i % 2].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
         meter_units = meter_units.expand((dataloader.batch_size, 2))                        # Create batch dimension
 
         # Concatenate state_units, melody inputs, and meter_units
@@ -180,23 +182,39 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
     return epoch_loss
 
 def main():
-    # -- Initialize model
-    hnn = HNN()
+    '''
+    Prepare Data
+    '''
+    # -- Determine device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # -- Get inputs/labels training data
+    inputs, labels = load_data.create_training_data(ref_chords=True)
+    inputs, labels = inputs.to(device), labels.to(device)
+
+    # -- Create TensorDataset
+    dataset = TensorDataset(inputs, labels)
 
     # -- Create DataLoader
-    dataloader = DataLoader()
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+
+    '''
+    Create Model
+    '''
+    # -- Initialize model
+    hnn = HNN().to(device)
 
     # -- Define criterion/optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = opt.SGD(hnn.parameters(), lr=0.01, momentum=0.0)
 
-    # -- Determine device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # -- Train Model
-    train(hnn, dataloader, criterion, optimizer, device)
-
-    # -- Test Model
+    '''
+    Training
+    '''
+    epochs = 10
+    for epoch in range(epochs):
+        epoch_loss = train(hnn, dataloader, criterion, optimizer, device)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
 
 if __name__ == "__main__":
     main()
