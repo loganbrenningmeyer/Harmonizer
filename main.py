@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as opt
 import matplotlib.pyplot as plt
+import pandas as pd
 import os
 
 from models.hnn import HNN
@@ -49,9 +50,9 @@ def main():
     Create Model
     '''
     # -- Initialize model
-    hnn = HNN(hidden1_size=128, lr=0.05, weight_decay=1e-5,
+    hnn = HNN(hidden1_size=256, lr=0.01, weight_decay=0.0,
               melody_weights=10.0, chord_weights=2.5, state_units_decay=0.75,
-              model_name='hidden1_128_state_075')
+              model_name='huge_size_high_weights_low_lr')
 
     # -- Put model on device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -74,7 +75,7 @@ def main():
     train_accuracies = []
     test_accuracies = []
 
-    epochs = 500
+    epochs = 1000
     for epoch in range(1, epochs + 1):
         # -- Train for an epoch and store epoch loss
         epoch_loss = train(hnn, train_dataloader, criterion, optimizer, device)
@@ -161,6 +162,30 @@ def main():
     plt.tight_layout()
     plt.savefig(f'{figs_dir}/train_test_loss_accuracy.png')
     plt.close()
+
+    '''
+    Write Training Metrics/Model Params to CSV
+    '''
+    metrics = {
+        'train_loss': train_losses,
+        'train_accuracy': train_accuracies,
+        'test_accuracy': test_accuracies
+    }
+
+    params = {
+        'hidden1_size': hnn.hidden1_size,
+        'lr': hnn.lr,
+        'weight_decay': hnn.weight_decay,
+        'melody_weights': hnn.melody_weights,
+        'chord_weights': hnn.chord_weights,
+        'state_units_decay': hnn.state_units_decay
+    }
+
+    df = pd.DataFrame(metrics)
+    df.to_csv(f'saved_models/hnn/{hnn.model_name}/metrics.csv', index=False)
+
+    df = pd.DataFrame(params)
+    df.to_csv(f'saved_models/hnn/{hnn.model_name}/params.csv', index=False)
 
 
 if __name__ == "__main__":
