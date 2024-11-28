@@ -191,5 +191,6 @@ def main():
 if __name__ == "__main__":
     train_dataloader, test_dataloader = create_dataloaders()
 
-    plot_class_counts(test_dataloader)
+
+    plot_class_counts(train_dataloader, 'train_input_counts.png', 'train_label_counts.png')
     # main()

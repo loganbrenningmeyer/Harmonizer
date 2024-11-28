@@ -94,7 +94,7 @@ def play_chord(chord, duration=CHORD_DURATION, volume=VOLUME):
     active_sounds.append(chord_sound)
 
 
-def play_comp(notes, chord):
+def play_comp(notes, chord, note_duration: int = NOTE_DURATION):
     '''
     Plays notes over a backing chord
     '''
@@ -102,13 +102,13 @@ def play_comp(notes, chord):
 
     if notes[0] is not None:
         for note in notes:
-            play_note(note)
-            time.sleep(NOTE_DURATION)
+            play_note(note, note_duration)
+            time.sleep(note_duration)
     else:
-        time.sleep(NOTE_DURATION)
+        time.sleep(note_duration)
 
 
-def play_song(model_path: str, song_idx: int):
+def play_song(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION):
     # -- Initialize Pygame mixer
     pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
     pygame.mixer.init()
@@ -166,4 +166,4 @@ def play_song(model_path: str, song_idx: int):
 
         # Playback note/chord
         print(f"note: {note_str}, chord: {chord_str}")
-        play_comp([note_str], chord_str)
+        play_comp([note_str], chord_str, note_duration)

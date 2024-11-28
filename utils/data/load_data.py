@@ -263,7 +263,7 @@ def create_dataloaders(ref_chords: bool = True):
     return train_dataloader, test_dataloader
 
 
-def plot_class_counts(dataloader: DataLoader, save_dir: str = ''):
+def plot_class_counts(dataloader: DataLoader, inputs_save_path, labels_save_path):
     '''
     Plot class counts for inputs (12 notes) and labels (14 chords) of DataLoader
     '''
@@ -293,7 +293,7 @@ def plot_class_counts(dataloader: DataLoader, save_dir: str = ''):
     plt.title('Input Class Counts')
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'input_counts.png'))
+    plt.savefig(inputs_save_path)
     plt.close()
 
     # -- Plot label counts
@@ -308,5 +308,5 @@ def plot_class_counts(dataloader: DataLoader, save_dir: str = ''):
     plt.title('Label Class Counts')
 
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'label_counts.png'))
+    plt.savefig(os.path.join(labels_save_path))
     plt.close()
