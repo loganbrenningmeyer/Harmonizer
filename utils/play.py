@@ -113,6 +113,8 @@ def play_song(model_path: str, song_idx: int):
     pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
     pygame.mixer.init()
 
+    print(f"\n-------- model: {model_path}, song_idx: {song_idx} --------\n")
+
     # -- Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -165,12 +167,3 @@ def play_song(model_path: str, song_idx: int):
         # Playback note/chord
         print(f"note: {note_str}, chord: {chord_str}")
         play_comp([note_str], chord_str)
-
-
-def main():
-    play_song(model_path='../../saved_models/hnn/hidden1_64_melody_10/epoch100.pth', 
-              song_idx=0)
-    
-
-if __name__ == "__main__":
-    main()

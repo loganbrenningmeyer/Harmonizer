@@ -6,7 +6,7 @@ import pandas as pd
 import os
 
 from models.hnn import HNN
-from utils.data.load_data import create_dataloaders
+from utils.data.load_data import create_dataloaders, plot_class_counts
 from utils.experiment import train, test
 
 
@@ -184,9 +184,12 @@ def main():
     df = pd.DataFrame(metrics)
     df.to_csv(f'saved_models/hnn/{hnn.model_name}/metrics.csv', index=False)
 
-    df = pd.DataFrame(params)
+    df = pd.DataFrame(params, index=[0])
     df.to_csv(f'saved_models/hnn/{hnn.model_name}/params.csv', index=False)
 
 
 if __name__ == "__main__":
-    main()
+    train_dataloader, test_dataloader = create_dataloaders()
+
+    plot_class_counts(test_dataloader)
+    # main()

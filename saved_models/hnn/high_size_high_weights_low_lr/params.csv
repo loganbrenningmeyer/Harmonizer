@@ -1,0 +1,2 @@
+hidden1_size,lr,weight_decay,melody_weights,chord_weights,state_units_decay
+128,0.01,0.0,10.0,2.5,0.75

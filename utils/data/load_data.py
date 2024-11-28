@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
+import matplotlib.pyplot as plt
 import os
 import re
 import random
@@ -260,3 +261,52 @@ def create_dataloaders(ref_chords: bool = True):
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     return train_dataloader, test_dataloader
+
+
+def plot_class_counts(dataloader: DataLoader, save_dir: str = ''):
+    '''
+    Plot class counts for inputs (12 notes) and labels (14 chords) of DataLoader
+    '''
+    num_notes = 12
+    num_chords = 14
+
+    input_counts = torch.zeros(num_notes, dtype=torch.int64)
+    label_counts = torch.zeros(num_chords, dtype=torch.int64)
+
+    for song_inputs, song_labels in dataloader:
+        
+        input_count = torch.sum(song_inputs.squeeze(0), dim=0, dtype=torch.int64)
+
+        label_count = torch.bincount(song_labels.squeeze(0), minlength=num_chords)
+
+        input_counts += input_count
+        label_counts += label_count
+
+    # -- Plot input counts
+    input_classes = [IDX_TO_NOTE_STR_REF.get(note_idx) for note_idx in range(num_notes)]
+    bars = plt.bar(input_classes, input_counts)
+    plt.bar_label(bars, padding=3)
+
+    plt.ylim(0, max(input_counts) * 1.1)
+    plt.xlabel('Notes')
+    plt.ylabel('Count')
+    plt.title('Input Class Counts')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'input_counts.png'))
+    plt.close()
+
+    # -- Plot label counts
+    label_classes = [IDX_TO_CHORD_STR_REF.get(chord_idx) for chord_idx in range(num_chords)]
+    bars = plt.bar(label_classes, label_counts)
+    plt.bar_label(bars, padding=3)
+
+    plt.ylim(0, max(label_counts) * 1.1)
+    plt.xticks(rotation=45)
+    plt.xlabel('Chords')
+    plt.ylabel('Count')
+    plt.title('Label Class Counts')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'label_counts.png'))
+    plt.close()

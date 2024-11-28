@@ -1,13 +1,53 @@
 from models.hnn import HNN
 from utils.play import play_song
+import random
 
 '''
 Run from Command Prompt to support audio output
+
+avg_accuracy
+-- Model: high_size_low_weights
+-- Epoch: 553 (~epoch550.pth)
+-- Accuracy: 41.635769362310725
+
+train_accuracy
+-- Model: huge_size_med_weights
+-- Epoch: 715 (~epoch710.pth & ~epoch720.pth)
+-- Accuracy: 48.70309050772627
+
+test_accuracy
+-- Model: high_size_high_weights_low_lr
+-- Epoch: 538 (~epoch540.pth)
+-- Accuracy: 39.61267605633803
 '''
 
 def main():
-    play_song(model_path='saved_models/hnn/hidden1_128_state_075/weights/epoch500.pth', 
-              song_idx=26)
+    '''
+    Model Paths
+    '''
+    best_avg = 'saved_models/hnn/high_size_low_weights/weights/epoch550.pth'
+    best_train = 'saved_models/hnn/huge_size_med_weights/weights/epoch710.pth'
+    best_test = 'saved_models/hnn/high_size_high_weights_low_lr/weights/epoch540.pth'
+
+    # -- Low (1st Hidden Size: 32)
+    low_high_low = 'saved_models/hnn/low_size_high_weights_low_lr/weights/epoch780.pth'
+
+    # -- Medium (1st Hidden Size: )
+    med_high_low = 'saved_models/hnn/med_size_high_weights_low_lr/weights/epoch440.pth'
+
+    # -- High
+    high_high = 'saved_models/hnn/high_size_high_weights/weights/epoch240.pth'
+
+    # -- Huge
+    huge_high_low = 'saved_models/hnn/huge_size_high_weights_low_lr/weights/epoch860.pth'
+
+    '''
+    Pick Random Song and Playback
+    '''
+    song_idx = random.randint(0, 78)
+
+    play_song(model_path=best_test,
+              song_idx=song_idx)
     
 if __name__ == "__main__":
     main()
