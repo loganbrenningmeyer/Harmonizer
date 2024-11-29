@@ -1,6 +1,10 @@
 from models.hnn import HNN
-from utils.play import play_song
+from models.mnet import MelodyNet
+from utils.play import play_song_hnn, play_song_mnet
 import random
+
+NOTE_DURATION_HNN = 0.75
+NOTE_DURATION_MNET = 0.1
 
 '''
 Run from Command Prompt to support audio output
@@ -21,7 +25,7 @@ test_accuracy
 -- Accuracy: 39.61267605633803
 '''
 
-def main():
+def hnn_main():
     '''
     Model Paths
     '''
@@ -46,13 +50,30 @@ def main():
     huge_high_low = 'saved_models/hnn/huge_size_high_weights_low_lr/weights/epoch860.pth'
 
     '''
-    Pick Random Song and Playback
+    Pick Random Song and Playback (79 HNN compatible songs)
     '''
     song_idx = random.randint(0, 78)
 
-    play_song(model_path=best_test,
-              song_idx=song_idx,
-              note_duration=0.75)
+    play_song_hnn(model_path=best_test,
+                  song_idx=song_idx,
+                  note_duration=NOTE_DURATION_HNN)
+    
+
+def mnet_main():
+    '''
+    Model Paths
+    '''
+    test = 'saved_models/mnet/test/weights/epoch1.pth'
+
+    '''
+    Pick Random song and playback (5167 MelodyNet compatible songs)
+    '''
+    song_idx = random.randint(0, 5166)
+
+    play_song_mnet(model_path=test,
+                   song_idx=song_idx,
+                   note_duration=NOTE_DURATION_MNET)
+
     
 if __name__ == "__main__":
-    main()
+    mnet_main()

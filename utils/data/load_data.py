@@ -159,7 +159,17 @@ def parse_data(hnn_data: bool):
     return songs
 
 
-def get_songs_notes(hnn_data: bool):
+def get_songs_chords():
+    # -- Parse data into songs list of dicts
+    songs = parse_data(hnn_data=False)
+
+    # -- Extract chord digit encodings from songs list
+    songs_chords = [song['chords'] for song in songs]
+
+    return songs_chords
+
+
+def get_songs_notes():
     '''
     Returns:
     - notes_by_song: Nested list in the form: list[song_idx][note_idx]
@@ -168,19 +178,15 @@ def get_songs_notes(hnn_data: bool):
                 ...]
     '''
     # -- Parse data into songs list of dicts
-    songs = parse_data(hnn_data)
+    songs = parse_data(hnn_data=True)
 
     # -- Extract note digit encodings from songs list
     songs_notes = [song['notes'] for song in songs]
 
-    # # -- Convert note encodings to strings (note + octave)
-    # songs_note_strings = [[NOTE_ENC_TO_NOTE_STR_REF.get(note_enc[:2]) + note_enc[2] for note_enc in song] 
-    #                       for song in songs_note_encodings]
-
     return songs_notes
 
 
-def create_hnn_dataloaders():
+def create_dataloaders_hnn():
     '''
     Creates training/testing dataloaders for the HNN model
 
@@ -261,7 +267,7 @@ def create_hnn_dataloaders():
     return train_dataloader, test_dataloader
 
 
-def create_mnet_dataloaders():
+def create_dataloaders_mnet():
     '''
     Creates training/testing dataloaders for MelodyNet model
 

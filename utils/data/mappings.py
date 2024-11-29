@@ -73,9 +73,11 @@ NOTE_ENC_TO_NOTE_STR_REF = {
     # -- A#/Bb
     '12' : 'A#',
     '20' : 'A#',
-    # -- B
+    # -- B/Cb
     '21' : 'B',
-    # -- C
+    '30' : 'B',
+    # -- C/B#
+    '22' : 'C',
     '31' : 'C',
     # -- C#/Db
     '32' : 'C#',
@@ -85,9 +87,11 @@ NOTE_ENC_TO_NOTE_STR_REF = {
     # -- D#/Eb
     '42' : 'D#',
     '50' : 'D#',
-    # -- E
+    # -- E/Fb
     '51' : 'E',
-    # -- F
+    '60' : 'E',
+    # -- F/E#
+    '52' : 'F',
     '61' : 'F',
     # -- F#/Gb
     '62' : 'F#',
@@ -231,6 +235,19 @@ CHORD_ENC_TO_IDX_REF = {
 }
 
 
-CHORD_ENC_TO_IDX_MNET = {
-    #
+CHORD_TYPE_IDX_TO_STR = {
+    # -- maj
+    '0' : 'maj',
+    # -- min
+    '1' : 'min',
+    # -- dim
+    '2' : 'dim',
+    # -- maj7
+    '3' : 'maj7',
+    # -- min7
+    '4' : 'min7',
+    # -- dom7
+    '5' : 'dom7',
+    # -- min7b5
+    '6' : 'min7b5'
 }

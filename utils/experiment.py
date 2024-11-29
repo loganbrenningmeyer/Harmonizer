@@ -9,23 +9,6 @@ from models.mnet import MelodyNet
 
 from tqdm import tqdm
 
-# def train_mnet(model: MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
-#     # -- Set model to train
-#     model.train()
-
-#     total_loss = 0.0
-
-#     # -- Iterate through DataLoader batches (each batch is a song)
-#     for song_inputs, song_labels in dataloader:
-#         # -- Put song data onto device and remove batch dim
-#         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
-#         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
-
-#         # -- Initialize state units to 0 (will update w/ outputs in loop)
-#         state_units = torch.zeros((1, model.output_size)).to(device)
-
-    
-
 
 def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
 

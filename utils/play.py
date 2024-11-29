@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 from utils.data.mappings import *
-from utils.data.load_data import get_songs_notes
+from utils.data.load_data import get_songs_notes, get_songs_chords
 
 # -- Define constants for playback
 SAMPLE_RATE = 44100
@@ -108,7 +108,74 @@ def play_comp(notes, chord, note_duration: int = NOTE_DURATION):
         time.sleep(note_duration)
 
 
-def play_song(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION):
+def play_song_mnet(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION):
+    # -- Initialize Pygame mixer
+    pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
+    pygame.mixer.init()
+
+    print(f"\n-------- model: {model_path}, song_idx: {song_idx} --------\n")
+
+    # -- Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # -- Load MelodyNet model in eval mode
+    mnet = torch.load(model_path, map_location=device)
+    mnet.eval()
+
+    # -- Get chord encodings of specified song_idx
+    song_chords = get_songs_chords()[song_idx]
+
+    print(len(song_chords))
+
+    # -- Initialize chord one-hot encoding arrays to index from
+    chord_enc_array = torch.eye(mnet.chord_size, dtype=int)
+
+    # -- Initialize state units
+    state_units = torch.zeros((1, mnet.output_size)).to(device)
+
+    for timestep in range(len(song_chords)):
+        print(f"timestep: {timestep}")
+        # Get one-hot encoding chord index
+        chord = song_chords[timestep]
+        chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
+        # Obtain chord input as one-hot encoding
+        input_t = chord_enc_array[chord_idx].unsqueeze(0)
+
+        # Determine meter units
+        meter_units = F.one_hot(torch.arange(mnet.meter_size, dtype=torch.long))[timestep % mnet.meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+        meter_units = meter_units.expand((1, mnet.meter_size))
+
+        # Concatenate state_units, melody inputs, and meter_units
+        inputs = torch.cat([state_units, input_t, meter_units], dim=1)
+
+        # Forward pass
+        output = mnet(inputs)
+
+        # Update state units
+        state_units = F.softmax(output, dim=1) + mnet.state_units_decay * state_units
+        state_units = state_units / state_units.sum(dim=1, keepdim=True)
+
+        # Get note/chord as strings for playback
+        chord_root = NOTE_ENC_TO_NOTE_STR_REF.get(chord[:2])
+        chord_type = CHORD_TYPE_IDX_TO_STR.get(chord[2])
+        chord_str = chord_root + chord_type
+
+        note_idx = int(np.argmax(output.detach().squeeze(0)))
+        
+        if note_idx == 0:
+            note_str = None
+        else:
+            note_root_idx = (note_idx - 1) // 12
+            note_lifespan = ((note_idx - 1) - (note_root_idx * 12)) // 6
+            note_octave = ((note_idx - 1) - (note_root_idx * 12)) + 2
+
+            note_str = IDX_TO_NOTE_STR_REF.get(note_root_idx) + str(note_octave)
+
+        print(f"chord: {chord_str}, note: {note_str}")
+        play_comp([note_str], chord_str, note_duration)
+
+
+def play_song_hnn(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION):
     # -- Initialize Pygame mixer
     pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
     pygame.mixer.init()
@@ -125,8 +192,8 @@ def play_song(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION
     # -- Get note encodings of specified song_idx
     song_notes = get_songs_notes()[song_idx]
 
-    # -- Initialize note/chord one-hot encoding arrays to index from
-    note_enc_array = torch.eye(12, dtype=int)
+    # -- Initialize note one-hot encoding arrays to index from
+    note_enc_array = torch.eye(hnn.melody_size, dtype=int)
 
     # -- Initialize state units
     state_units = torch.zeros((1, hnn.output_size)).to(device)
@@ -142,8 +209,8 @@ def play_song(model_path: str, song_idx: int, note_duration: int = NOTE_DURATION
             input_t = torch.zeros((1, 12), dtype=int)
 
         # Determine meter units
-        meter_units = F.one_hot(torch.arange(2, dtype=torch.long))[timestep % 2].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
-        meter_units = meter_units.expand((1, 2))
+        meter_units = F.one_hot(torch.arange(hnn.meter_size, dtype=torch.long))[timestep % hnn.meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+        meter_units = meter_units.expand((1, hnn.meter_size))
 
         # Concatenate state_units, melody inputs, and meter_units
         inputs = torch.cat([state_units, input_t, meter_units], dim=1)

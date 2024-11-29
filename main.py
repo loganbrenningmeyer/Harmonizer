@@ -45,7 +45,7 @@ def hnn_main():
     '''
     Create DataLoaders
     '''
-    train_dataloader, test_dataloader = create_hnn_dataloaders()
+    train_dataloader, test_dataloader = create_dataloaders_hnn()
 
     '''
     Create HNN Model
@@ -193,7 +193,7 @@ def mnet_main():
     '''
     Create DataLoaders
     '''
-    train_dataloader, test_dataloader = create_mnet_dataloaders()
+    train_dataloader, test_dataloader = create_dataloaders_mnet()
 
     '''
     Create MelodyGen Model
