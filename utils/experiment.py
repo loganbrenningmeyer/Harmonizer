@@ -7,23 +7,42 @@ from torch.utils.data import DataLoader
 from models.hnn import HNN
 from models.mnet import MelodyNet
 
+from tqdm import tqdm
 
-def train_mnet(model: MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
-    # -- Set model to train
-    model.train()
+# def train_mnet(model: MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
+#     # -- Set model to train
+#     model.train()
+
+#     total_loss = 0.0
+
+#     # -- Iterate through DataLoader batches (each batch is a song)
+#     for song_inputs, song_labels in dataloader:
+#         # -- Put song data onto device and remove batch dim
+#         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
+#         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
+
+#         # -- Initialize state units to 0 (will update w/ outputs in loop)
+#         state_units = torch.zeros((1, model.output_size)).to(device)
 
     
 
 
-def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
+def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
+
+    # -- Define meter units size based on model
+    if isinstance(model, HNN):
+        meter_size = 2
+    elif isinstance(model, MelodyNet):
+        meter_size = 16
+
     # -- Set model to train
     model.train()
 
     total_loss = 0.0
 
     # -- Iterate through DataLoader batches (each batch is a song)
-    for song_inputs, song_labels in dataloader:
-        # -- Put song data onto device and add batch dim
+    for song_inputs, song_labels in tqdm(dataloader):
+        # -- Put song data onto device and remove batch dim
         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
 
@@ -40,8 +59,8 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
             label_t = song_labels[timestep].unsqueeze(0)
 
             # Define meter_units based on batch index
-            meter_units = F.one_hot(torch.arange(2, dtype=torch.long))[timestep % 2].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
-            meter_units = meter_units.expand((dataloader.batch_size, 2))                        # Create batch dimension
+            meter_units = F.one_hot(torch.arange(meter_size, dtype=torch.long))[timestep % meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+            meter_units = meter_units.expand((dataloader.batch_size, meter_size))                        # Create batch dimension
 
             # Concatenate state_units, melody inputs, and meter_units
             inputs = torch.cat([state_units, input_t, meter_units], dim=1)
@@ -57,7 +76,10 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
             loss.backward()
 
             # Zero fixed weight gradients
-            model.hidden2_from_melody.weight.grad.fill_diagonal_(0.0)
+            if isinstance(model, HNN):
+                model.hidden2_from_melody.weight.grad.fill_diagonal_(0.0)
+            elif isinstance(model, MelodyNet):
+                model.hidden2_from_chord.weight.grad.fill_diagonal_(0.0)
 
             # Update weights
             optimizer.step()
@@ -75,14 +97,21 @@ def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: o
     return epoch_loss
 
 
-def test(model: HNN, dataloader: DataLoader, device: torch.device):
+def test(model: HNN | MelodyNet, dataloader: DataLoader, device: torch.device):
+
+    # -- Define meter units size based on model
+    if isinstance(model, HNN):
+        meter_size = 2
+    elif isinstance(model, MelodyNet):
+        meter_size = 16
+
     # -- Set model to eval mode
     model.eval()
 
     num_correct = 0
 
     # -- Iterate through testing DataLoader
-    for song_inputs, song_labels in dataloader:
+    for song_inputs, song_labels in tqdm(dataloader):
         # -- Put song data onto device and add batch dim
         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
@@ -97,8 +126,8 @@ def test(model: HNN, dataloader: DataLoader, device: torch.device):
             label_t = song_labels[timestep].unsqueeze(0)
 
             # Define meter_units based on batch index
-            meter_units = F.one_hot(torch.arange(2, dtype=torch.long))[timestep % 2].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
-            meter_units = meter_units.expand((dataloader.batch_size, 2))                        # Create batch dimension
+            meter_units = F.one_hot(torch.arange(meter_size, dtype=torch.long))[timestep % meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+            meter_units = meter_units.expand((dataloader.batch_size, meter_size))                        # Create batch dimension
 
             # Concatenate state_units, melody inputs, and meter_units
             inputs = torch.cat([state_units, input_t, meter_units], dim=1)

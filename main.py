@@ -45,7 +45,7 @@ def hnn_main():
     '''
     Create DataLoaders
     '''
-    train_dataloader, test_dataloader = create_dataloaders(ref_chords=True)
+    train_dataloader, test_dataloader = create_hnn_dataloaders()
 
     '''
     Create HNN Model
@@ -193,29 +193,148 @@ def mnet_main():
     '''
     Create DataLoaders
     '''
-    # train_dataloader, test_dataloader = create_dataloaders(ref_chords=False)
+    train_dataloader, test_dataloader = create_mnet_dataloaders()
 
     '''
     Create MelodyGen Model
     '''
     # -- Initialize model
-    # with open('data/chord_melody_data.txt', 'r') as file:
-    #     text = file.read()
-
-    # songs = parse_data(text, ref_chords=False)
-
-    # octave_counts = np.zeros(8)
-
-    # for song in songs:
-    #     for note in song['notes']:
-    #         octave = int(note[2])
-    #         octave_counts[octave] += 1
-
-    # for octave, count in enumerate(octave_counts):
-    #     print(f"Octave {octave}: {count}")
-
-    mnet = MelodyNet(hidden1_size=128, chord_weights=1.0, melody_weights=1.0, model_name='hello')
+    mnet = MelodyNet(hidden1_size=256, lr=0.05, weight_decay=1e-5,
+                     chord_weights=10.0, melody_weights=2.5, state_units_decay=0.75,
+                     model_name='test2')
     
+    # -- Put model on device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    mnet.to(device)
+
+    # -- Define criterion/optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = opt.SGD(mnet.parameters(), lr=mnet.lr, momentum=mnet.momentum, weight_decay=mnet.weight_decay)
+
+    '''
+    Training/Testing
+    '''
+    # -- Create model weights dir/model figs dir
+    weights_dir = f'saved_models/mnet/{mnet.model_name}/weights'
+    figs_dir = f'saved_models/mnet/{mnet.model_name}/figs'
+    os.makedirs(weights_dir, exist_ok=True)
+    os.makedirs(figs_dir, exist_ok=True)
+
+    train_losses = []
+    train_accuracies = []
+    test_accuracies = []
+
+    epochs = 10
+    for epoch in range(1, epochs + 1):
+        # -- Train for an epoch and store epoch loss
+        epoch_loss = train(mnet, train_dataloader, criterion, optimizer, device)
+        train_losses.append(epoch_loss)
+        print(f"-- Epoch {epoch}/{epochs}, Loss: {epoch_loss:.4f}")
+
+        # -- Evaluate model on train set
+        train_accuracy = test(mnet, train_dataloader, device)
+        train_accuracies.append(train_accuracy * 100)
+        print(f"Training Accuracy: {train_accuracy*100:.2f}%")
+
+        # -- Evaluate model on test set
+        test_accuracy = test(mnet, test_dataloader, device)
+        test_accuracies.append(test_accuracy * 100)
+        print(f"Testing Accuracy: {test_accuracy*100:.2f}%\n")
+
+        # -- Save trained model every epoch
+        torch.save(mnet, f'{weights_dir}/epoch{epoch}.pth')
+
+
+    '''
+    Plot Training & Testing Loss/Accuracy
+    '''
+    # -- Plot training loss
+    plt.figure()
+    plt.plot(range(1, epochs + 1), train_losses, label='Training Loss', color='red')
+
+    plt.title(f'Train Loss ({mnet.model_name})')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(f'{figs_dir}/train_loss.png')
+    plt.close()
+
+    # -- Plot training accuracy
+    plt.figure()
+    plt.plot(range(1, epochs + 1), train_accuracies, label='Training Accuracy', color='green')
+
+    plt.title(f'Train Accuracy ({mnet.model_name})')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(f'{figs_dir}/train_accuracy.png')
+    plt.close()
+
+    # -- Plot testing accuracy
+    plt.figure()
+    plt.plot(range(1, epochs + 1), test_accuracies, label='Testing Accuracy', color='blue')
+
+    plt.title(f'Test Accuracy ({mnet.model_name})')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(f'{figs_dir}/test_accuracy.png')
+    plt.close()
+
+    # -- Coplot loss & accuracies
+    plt.figure()
+
+    # Plot training loss
+    ax1 = plt.gca()
+    ax1.plot(range(1, epochs + 1), train_losses, label='Training Loss', color='red')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+
+    # Plot training/testing accuracy w/ shared x-axis
+    ax2 = ax1.twinx()
+    ax2.plot(range(1, epochs + 1), train_accuracies, label='Training Accuracy', color='green')
+    ax2.plot(range(1, epochs + 1), test_accuracies, label='Test Accuracy', color='blue')
+    ax2.set_ylabel('Accuracy (%)')
+
+    # Combine legends
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    plt.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
+
+    plt.title(f'Train Loss & Train/Test Accuracy ({mnet.model_name})')
+    plt.tight_layout()
+    plt.savefig(f'{figs_dir}/train_test_loss_accuracy.png')
+    plt.close()
+
+    '''
+    Write Training Metrics/Model Params to CSV
+    '''
+    metrics = {
+        'train_loss': train_losses,
+        'train_accuracy': train_accuracies,
+        'test_accuracy': test_accuracies
+    }
+
+    params = {
+        'hidden1_size': mnet.hidden1_size,
+        'lr': mnet.lr,
+        'weight_decay': mnet.weight_decay,
+        'melody_weights': mnet.melody_weights,
+        'chord_weights': mnet.chord_weights,
+        'state_units_decay': mnet.state_units_decay
+    }
+
+    df = pd.DataFrame(metrics)
+    df.to_csv(f'saved_models/mnet/{mnet.model_name}/metrics.csv', index=False)
+
+    df = pd.DataFrame(params, index=[0])
+    df.to_csv(f'saved_models/mnet/{mnet.model_name}/params.csv', index=False)
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ def is_compatible(song: dict):
     return True
 
 
-def parse_data(text: str, ref_chords: bool = True):
+def parse_data(hnn_data: bool):
     '''
     Parses the chord_melody_data.txt file for songs, 
     storing the notes/chords at the 1st/3rd beats
@@ -88,6 +88,10 @@ def parse_data(text: str, ref_chords: bool = True):
     - songs: List of dictionaries for each song containing
       the 'notes' and 'chords' at the 1st/3rd beats
     '''
+    # -- Read chord_melody_data
+    with open('data/chord_melody_data.txt', 'r') as file:
+        text = file.read()
+
     # -- Split text file into 4-bar groups
     bar_groups = text.strip().split('#')[:-1]
 
@@ -119,7 +123,7 @@ def parse_data(text: str, ref_chords: bool = True):
             # If it isn't the first iteration...
             if curr_key is not None:
                 # If only using reference model chords (maj & dom7) check compatibility
-                if ref_chords:
+                if hnn_data:
                     if is_compatible(song):
                         songs.append(song)
                 # If not using reference model chords, return any song
@@ -135,17 +139,27 @@ def parse_data(text: str, ref_chords: bool = True):
             # Update curr_key
             curr_key = key
 
-        # -- Append 1st/3rd beat chords to song dict (all chords)
-        song['chords'].extend(chords)
+        # HNN Model (Melody -> Chord)
+        if hnn_data:
+            # -- Append 1st/3rd beat chords to song dict (all chords)
+            song['chords'].extend(chords)
 
-        # -- Append 1st/3rd beat notes to song dict
-        for bar_notes in notes:
-            song['notes'].extend([bar_notes[0], bar_notes[8]])
+            # -- Append 1st/3rd beat notes to song dict
+            for bar_notes in notes:
+                song['notes'].extend([bar_notes[0], bar_notes[8]])
+
+        # MelodyNet Model (Chord -> Melody)
+        else:
+            # -- Append all chords duplicated 8 times to cover all 16th beat timesteps (2 chords per measure)
+            song['chords'].extend([chord for chord in chords for _ in range(8)])
+
+            # -- Append all notes 
+            song['notes'].extend([note for bar_notes in notes for note in bar_notes])
 
     return songs
 
 
-def get_songs_notes(ref_chords: bool = True):
+def get_songs_notes(hnn_data: bool):
     '''
     Returns:
     - notes_by_song: Nested list in the form: list[song_idx][note_idx]
@@ -153,12 +167,8 @@ def get_songs_notes(ref_chords: bool = True):
                 ['C3', 'E3', 'G4'],
                 ...]
     '''
-    # -- Read chord_melody_data.txt
-    with open('data/chord_melody_data.txt', 'r') as file:
-        text = file.read()
-
     # -- Parse data into songs list of dicts
-    songs = parse_data(text, ref_chords=ref_chords)
+    songs = parse_data(hnn_data)
 
     # -- Extract note digit encodings from songs list
     songs_notes = [song['notes'] for song in songs]
@@ -170,38 +180,26 @@ def get_songs_notes(ref_chords: bool = True):
     return songs_notes
 
 
-def create_dataloaders(ref_chords: bool = True):
+def create_hnn_dataloaders():
     '''
-    Conversed parsed song data to one-hot encodings
-    for notes/chords
-    - notes: One-hot encoding of chromatic scale
+    Creates training/testing dataloaders for the HNN model
 
-        * [A  A#/Bb B  C  C#/Db D  D#/Eb E  F  F#/Gb G   G#/Ab]
-        * [0  1     2  3  4     5  6     7  8  9     10  11   ]
-    - chords (ref_chords = True): One-hot encoding of 14 chords (7 maj, 7 dom7)
+    - notes: One-hot encoding of chromatic scale
+        * [A  A# B  C  C# D  D# E  F  F# G  G#]
+        * [0  1  2  3  4  5  6  7  8  9  10 11]
+    - chords: One-hot encoding of 14 chords (7 maj, 7 dom7)
         * [Amaj  Bmaj  Cmaj  Dmaj  Emaj  Fmaj  Gmaj  Adom7 Bdom7 Cdom7 Ddom7 Edom7 Fdom7 Gdom7]
-        * [110   210   310   410   510   610   710   115   215   315   415   515   615   715  ]
-    - chords (ref_chords = False): One-hot encoding of 84 chords (12 chromatic notes * 7 chord types)
-        * [A->G#] * maj, min, dim, maj7, min7, dom7, min7b5
+        * [0     1     2     3     4     5     6     7     8     9     10    11    12    13  ]
 
     Returns:
     - train_dataloader
     - test_dataloader
     '''
-    # -- Read chord_melody_data
-    with open('data/chord_melody_data.txt', 'r') as file:
-        text = file.read()
-
     # -- Parse data into songs list of dicts
-    songs = parse_data(text, ref_chords=ref_chords)
+    songs = parse_data(hnn_data=True)
 
     # -- Define notes/chords one-hot size 
     num_notes = 12
-
-    if ref_chords:
-        num_chords = 14
-    else:
-        num_chords = 84
 
     # -- Initialize note/chord one-hot encoding arrays to index from
     note_enc_array = np.eye(num_notes, dtype=int)
@@ -229,6 +227,87 @@ def create_dataloaders(ref_chords: bool = True):
             # -- Append notes to inputs & chords to labels
             song_inputs.append(note_input)
             song_labels.append(chord_label)
+
+        # -- Convert song inputs/labels to tensors
+        song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
+        song_labels = torch.tensor(np.array(song_labels, dtype=np.int64))
+
+        # -- Append song's inputs/labels to full list
+        inputs_by_song.append(song_inputs)
+        labels_by_song.append(song_labels)
+
+    # -- Randomly shuffle inputs/labels
+    inputs_and_labels = list(zip(inputs_by_song, labels_by_song))
+    
+    random.seed(42)
+    random.shuffle(inputs_and_labels)
+
+    inputs_by_song, labels_by_song = zip(*inputs_and_labels)
+
+    # -- Create training/testing sets (80% train/20% test)
+    num_train = int(0.8 * len(inputs_by_song))
+
+    train_inputs, train_labels = inputs_by_song[:num_train], labels_by_song[:num_train]
+    test_inputs, test_labels = inputs_by_song[num_train:], labels_by_song[num_train:]
+
+    # -- Create training TensorDataset/DataLoader
+    train_dataset = SongDataset(train_inputs, train_labels)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+    # -- Create testing TensorDataset/DataLoader
+    test_dataset = SongDataset(test_inputs, test_labels)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+    return train_dataloader, test_dataloader
+
+
+def create_mnet_dataloaders():
+    '''
+    Creates training/testing dataloaders for MelodyNet model
+
+    - chords: One-hot encoding of 84 possible chords (12 notes * 7 types)
+        * [Amaj/min/dim/maj7/min7/dom7/min7b5 -> G#maj/min/dim/maj7/min7/dom7/min7b5]
+        * [0    1   2   3    4    5    6     ... 77    78  79  80   81   82   83    ]
+    - notes: Labels of 145 possible note/octave/lifespan combinations
+        * [rest A2(0) A3(0) ... A6(1) A7(1) ... G#6(1) G#7(1)]
+        * [0    1     2     ... 11    12    ... 143    144   ]
+    '''
+    # -- Parse data into songs list of dicts
+    songs = parse_data(hnn_data=False)
+
+    # -- Define chords one-hot size 
+    num_chords = 84
+
+    # -- Initialize note/chord one-hot encoding arrays to index from
+    chord_enc_array = np.eye(num_chords, dtype=int)
+
+    # -- Initialize empty inputs/labels arrays
+    inputs_by_song = []
+    labels_by_song = []
+
+    for song in songs:
+        song_inputs = []
+        song_labels = []
+
+        for note, chord in zip(song['notes'], song['chords']):
+            # -- Map chord to one-hot index (7 * note_idx + chord_type_idx)
+            chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
+            # -- Obtain chord input one-hot encoding
+            chord_input = chord_enc_array[chord_idx]
+
+            # -- Map note to class label
+            note_idx = NOTE_ENC_TO_IDX_REF.get(note[:2])
+            note_octave = int(note[2])
+            note_lifespan = int(note[3])
+            # Rest note
+            if note_idx is None:
+                note_label = 0
+            else:
+                note_label = 1 + (note_idx * 12) + (note_octave - 2) + (note_lifespan * 6)
+
+            # -- Append chord to inputs & note to labels
+            song_inputs.append(chord_input)
+            song_labels.append(note_label)
 
         # -- Convert song inputs/labels to tensors
         song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
