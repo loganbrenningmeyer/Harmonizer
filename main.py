@@ -6,7 +6,8 @@ import pandas as pd
 import os
 
 from models.hnn import HNN
-from utils.data.load_data import create_dataloaders, plot_class_counts
+from models.mnet import MelodyNet
+from utils.data.load_data import *
 from utils.experiment import train, test
 
 
@@ -40,14 +41,14 @@ hnn = HNN(hidden1_size=64, lr=0.05, weight_decay=1e-4,
 '''
 
 
-def main():
+def hnn_main():
     '''
     Create DataLoaders
     '''
-    train_dataloader, test_dataloader = create_dataloaders()
+    train_dataloader, test_dataloader = create_dataloaders(ref_chords=True)
 
     '''
-    Create Model
+    Create HNN Model
     '''
     # -- Initialize model
     hnn = HNN(hidden1_size=256, lr=0.01, weight_decay=0.0,
@@ -188,9 +189,34 @@ def main():
     df.to_csv(f'saved_models/hnn/{hnn.model_name}/params.csv', index=False)
 
 
+def mnet_main():
+    '''
+    Create DataLoaders
+    '''
+    # train_dataloader, test_dataloader = create_dataloaders(ref_chords=False)
+
+    '''
+    Create MelodyGen Model
+    '''
+    # -- Initialize model
+    # with open('data/chord_melody_data.txt', 'r') as file:
+    #     text = file.read()
+
+    # songs = parse_data(text, ref_chords=False)
+
+    # octave_counts = np.zeros(8)
+
+    # for song in songs:
+    #     for note in song['notes']:
+    #         octave = int(note[2])
+    #         octave_counts[octave] += 1
+
+    # for octave, count in enumerate(octave_counts):
+    #     print(f"Octave {octave}: {count}")
+
+    mnet = MelodyNet(hidden1_size=128, chord_weights=1.0, melody_weights=1.0, model_name='hello')
+    
+
+
 if __name__ == "__main__":
-    train_dataloader, test_dataloader = create_dataloaders()
-
-
-    plot_class_counts(train_dataloader, 'train_input_counts.png', 'train_label_counts.png')
-    # main()
+    mnet_main()

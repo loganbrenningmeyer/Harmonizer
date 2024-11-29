@@ -5,6 +5,14 @@ import torch.optim as opt
 from torch.utils.data import DataLoader
 
 from models.hnn import HNN
+from models.mnet import MelodyNet
+
+
+def train_mnet(model: MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
+    # -- Set model to train
+    model.train()
+
+    
 
 
 def train(model: HNN, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
