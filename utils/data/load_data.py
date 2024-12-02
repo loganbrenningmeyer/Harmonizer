@@ -5,10 +5,13 @@ import matplotlib.pyplot as plt
 import os
 import re
 import random
+import seaborn as sns
+import pandas as pd
 
 from _io import TextIOWrapper
 
 from utils.data.mappings import *
+from utils.data.distributions import balance_samples
 
 '''
 chord_melody_data.txt format:
@@ -105,6 +108,7 @@ def parse_data(hnn_data: bool):
     curr_key = None
     # song = dict of 1st/3rd beat notes/chords for full song
     song = {
+        'key': None,
         'notes': [],
         'chords': []
     }
@@ -120,6 +124,9 @@ def parse_data(hnn_data: bool):
 
         # -- Begin a new song when the key changes
         if key != curr_key:
+
+            song['key'] = key
+
             # If it isn't the first iteration...
             if curr_key is not None:
                 # If only using reference model chords (maj & dom7) check compatibility
@@ -150,6 +157,11 @@ def parse_data(hnn_data: bool):
 
         # MelodyNet Model (Chord -> Melody)
         else:
+            '''
+            Want pairs of chords and notes w/ duration instead of lifespan
+
+            e.g. ('426', '6251'), ('426', '315)
+            '''
             # -- Append all chords duplicated 8 times to cover all 16th beat timesteps (2 chords per measure)
             song['chords'].extend([chord for chord in chords for _ in range(8)])
 
@@ -267,109 +279,109 @@ def create_dataloaders_hnn():
     return train_dataloader, test_dataloader
 
 
-def create_dataloaders_mnet():
-    '''
-    Creates training/testing dataloaders for MelodyNet model
+# def create_dataloaders_mnet():
+#     '''
+#     Creates training/testing dataloaders for MelodyNet model
 
-    - chords: One-hot encoding of 84 possible chords (12 notes * 7 types)
-        * [Amaj/min/dim/maj7/min7/dom7/min7b5 -> G#maj/min/dim/maj7/min7/dom7/min7b5]
-        * [0    1   2   3    4    5    6     ... 77    78  79  80   81   82   83    ]
-    - notes: Labels of 145 possible note/octave/lifespan combinations
-        * [rest A2(0) A3(0) ... A6(1) A7(1) ... G#6(1) G#7(1)]
-        * [0    1     2     ... 11    12    ... 143    144   ]
-    '''
-    # -- Parse data into songs list of dicts
-    songs = parse_data(hnn_data=False)
+#     - chords: One-hot encoding of 84 possible chords (12 notes * 7 types)
+#         * [Amaj/min/dim/maj7/min7/dom7/min7b5 -> G#maj/min/dim/maj7/min7/dom7/min7b5]
+#         * [0    1   2   3    4    5    6     ... 77    78  79  80   81   82   83    ]
+#     - notes: Labels of 145 possible note/octave/lifespan combinations
+#         * [rest A2(0) A3(0) ... A6(1) A7(1) ... G#6(1) G#7(1)]
+#         * [0    1     2     ... 11    12    ... 143    144   ]
+#     '''
+#     # -- Parse data into songs list of dicts
+#     songs = parse_data(hnn_data=False)
 
-    # -- Define chords one-hot size 
-    num_chords = 84
+#     # -- Define chords one-hot size 
+#     num_chords = 84
 
-    # -- Initialize note/chord one-hot encoding arrays to index from
-    chord_enc_array = np.eye(num_chords, dtype=int)
+#     # -- Initialize note/chord one-hot encoding arrays to index from
+#     chord_enc_array = np.eye(num_chords, dtype=int)
 
-    # -- Initialize empty inputs/labels arrays
-    inputs_by_song = []
-    labels_by_song = []
+#     # -- Initialize empty inputs/labels arrays
+#     inputs_by_song = []
+#     labels_by_song = []
 
-    for song in songs:
-        song_inputs = []
-        song_labels = []
+#     for song in songs:
+#         song_inputs = []
+#         song_labels = []
 
-        for note, chord in zip(song['notes'], song['chords']):
-            # -- Map chord to one-hot index (7 * note_idx + chord_type_idx)
-            chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
-            # -- Obtain chord input one-hot encoding
-            chord_input = chord_enc_array[chord_idx]
+#         for note, chord in zip(song['notes'], song['chords']):
+#             # -- Map chord to one-hot index (7 * note_idx + chord_type_idx)
+#             chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
+#             # -- Obtain chord input one-hot encoding
+#             chord_input = chord_enc_array[chord_idx]
 
-            # -- Map note to class label
-            note_idx = NOTE_ENC_TO_IDX_REF.get(note[:2])
-            note_octave = int(note[2])
-            note_lifespan = int(note[3])
-            # Rest note
-            if note_idx is None:
-                note_label = 0
-            else:
-                note_label = 1 + (note_idx * 12) + (note_octave - 2) + (note_lifespan * 6)
+#             # -- Map note to class label
+#             note_idx = NOTE_ENC_TO_IDX_REF.get(note[:2])
+#             note_octave = int(note[2])
+#             note_lifespan = int(note[3])
+#             # Rest note
+#             if note_idx is None:
+#                 note_label = 0
+#             else:
+#                 note_label = 1 + (note_idx * 12) + (note_octave - 2) + (note_lifespan * 6)
 
-            # -- Append chord to inputs & note to labels
-            song_inputs.append(chord_input)
-            song_labels.append(note_label)
+#             # -- Append chord to inputs & note to labels
+#             song_inputs.append(chord_input)
+#             song_labels.append(note_label)
 
-        # -- Convert song inputs/labels to tensors
-        song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
-        song_labels = torch.tensor(np.array(song_labels, dtype=np.int64))
+#         # -- Convert song inputs/labels to tensors
+#         song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
+#         song_labels = torch.tensor(np.array(song_labels, dtype=np.int64))
 
-        # -- Append song's inputs/labels to full list
-        inputs_by_song.append(song_inputs)
-        labels_by_song.append(song_labels)
+#         # -- Append song's inputs/labels to full list
+#         inputs_by_song.append(song_inputs)
+#         labels_by_song.append(song_labels)
 
-    # -- Randomly shuffle inputs/labels
-    inputs_and_labels = list(zip(inputs_by_song, labels_by_song))
+#     # -- Randomly shuffle inputs/labels
+#     inputs_and_labels = list(zip(inputs_by_song, labels_by_song))
     
-    random.seed(42)
-    random.shuffle(inputs_and_labels)
+#     random.seed(42)
+#     random.shuffle(inputs_and_labels)
 
-    inputs_by_song, labels_by_song = zip(*inputs_and_labels)
+#     inputs_by_song, labels_by_song = zip(*inputs_and_labels)
 
-    # -- Create training/testing sets (80% train/20% test)
-    num_train = int(0.8 * len(inputs_by_song))
+#     # -- Create training/testing sets (80% train/20% test)
+#     num_train = int(0.8 * len(inputs_by_song))
 
-    train_inputs, train_labels = inputs_by_song[:num_train], labels_by_song[:num_train]
-    test_inputs, test_labels = inputs_by_song[num_train:], labels_by_song[num_train:]
+#     train_inputs, train_labels = inputs_by_song[:num_train], labels_by_song[:num_train]
+#     test_inputs, test_labels = inputs_by_song[num_train:], labels_by_song[num_train:]
 
-    # -- Create training TensorDataset/DataLoader
-    train_dataset = SongDataset(train_inputs, train_labels)
-    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+#     # -- Create training TensorDataset/DataLoader
+#     train_dataset = SongDataset(train_inputs, train_labels)
+#     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
 
-    # -- Create testing TensorDataset/DataLoader
-    test_dataset = SongDataset(test_inputs, test_labels)
-    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+#     # -- Create testing TensorDataset/DataLoader
+#     test_dataset = SongDataset(test_inputs, test_labels)
+#     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    return train_dataloader, test_dataloader
+#     return train_dataloader, test_dataloader
 
 
-def plot_class_counts(dataloader: DataLoader, inputs_save_path, labels_save_path):
+def plot_class_counts_hnn(dataloader: DataLoader, model_name: str):
     '''
     Plot class counts for inputs (12 notes) and labels (14 chords) of DataLoader
     '''
-    num_notes = 12
-    num_chords = 14
+    num_input_notes = 12
+    num_label_chords = 14
 
-    input_counts = torch.zeros(num_notes, dtype=torch.int64)
-    label_counts = torch.zeros(num_chords, dtype=torch.int64)
+    input_counts = torch.zeros(num_input_notes, dtype=torch.int64)
+    label_counts = torch.zeros(num_label_chords, dtype=torch.int64)
 
     for song_inputs, song_labels in dataloader:
-        
+
         input_count = torch.sum(song_inputs.squeeze(0), dim=0, dtype=torch.int64)
 
-        label_count = torch.bincount(song_labels.squeeze(0), minlength=num_chords)
+        label_count = torch.bincount(song_labels.squeeze(0), minlength=num_label_chords)
 
         input_counts += input_count
         label_counts += label_count
 
-    # -- Plot input counts
-    input_classes = [IDX_TO_NOTE_STR_REF.get(note_idx) for note_idx in range(num_notes)]
-    bars = plt.bar(input_classes, input_counts)
+    # -- Plot input note counts
+    input_note_classes = [IDX_TO_NOTE_STR_REF.get(note_idx) for note_idx in range(num_input_notes)]
+    bars = plt.bar(input_note_classes, input_counts)
     plt.bar_label(bars, padding=3)
 
     plt.ylim(0, max(input_counts) * 1.1)
@@ -378,12 +390,12 @@ def plot_class_counts(dataloader: DataLoader, inputs_save_path, labels_save_path
     plt.title('Input Class Counts')
 
     plt.tight_layout()
-    plt.savefig(inputs_save_path)
+    plt.savefig(f'saved_models/hnn/{model_name}/figs/input_class_counts.png')
     plt.close()
 
-    # -- Plot label counts
-    label_classes = [IDX_TO_CHORD_STR_REF.get(chord_idx) for chord_idx in range(num_chords)]
-    bars = plt.bar(label_classes, label_counts)
+    # -- Plot label chord counts
+    label_chord_classes = [IDX_TO_CHORD_STR_REF.get(chord_idx) for chord_idx in range(num_label_chords)]
+    bars = plt.bar(label_chord_classes, label_counts)
     plt.bar_label(bars, padding=3)
 
     plt.ylim(0, max(label_counts) * 1.1)
@@ -393,5 +405,368 @@ def plot_class_counts(dataloader: DataLoader, inputs_save_path, labels_save_path
     plt.title('Label Class Counts')
 
     plt.tight_layout()
-    plt.savefig(os.path.join(labels_save_path))
+    plt.savefig(os.path.join(f'saved_models/hnn/{model_name}/figs/label_class_counts.png'))
     plt.close()
+
+
+def plot_class_counts_mnet(dataloader: DataLoader, model_name: str):
+    '''
+    Plot class counts for inputs (12 notes) and labels (14 chords) of DataLoader
+    '''
+    num_input_chords = 84
+    num_label_notes = 289
+
+    input_counts = torch.zeros(num_input_chords, dtype=torch.int64)
+    label_counts = torch.zeros(num_label_notes, dtype=torch.int64)
+
+    for song_inputs, song_labels in dataloader:
+        
+        input_count = torch.sum(song_inputs.squeeze(0), dim=0, dtype=torch.int64)
+
+        label_count = torch.bincount(song_labels.squeeze(0), minlength=num_label_notes)
+
+        input_counts += input_count
+        label_counts += label_count
+
+    # -- Define possible notes/chord types
+    chromatic_notes = ['A','A#','B','C','C#','D','D#','E','F','F#','G','G#']
+    chord_types = ['maj', 'min', 'dim', 'maj7', 'min7', 'dom7', 'min7b5']
+
+    # -- Plot input chord counts
+    input_chord_classes = [note + chord_type for note in chromatic_notes for chord_type in chord_types]
+    plt.figure(figsize=(20, 10), dpi=300)
+    bars = plt.barh(input_chord_classes, input_counts)
+    # plt.bar_label(bars, padding=3)
+
+    # plt.ylim(0, max(input_counts) * 1.1)
+    # plt.xticks(rotation=45)
+    plt.xlabel('Count')
+    plt.ylabel('Chords')
+    plt.title('Input Class Counts')
+
+    plt.tight_layout()
+    plt.savefig(f'saved_models/mnet/{model_name}/figs/input_class_counts.png')
+    plt.close()
+
+    # -- Plot label note counts
+    label_note_classes = ['rest'] + [note + str(octave) + str(duration) for note in chromatic_notes for octave in range(6) for duration in range(4)]
+    plt.figure(figsize=(20, 10), dpi=300)
+    bars = plt.bar(label_note_classes[1:1 + 24], label_counts[1:1 + 24])
+    plt.bar_label(bars, padding=3)
+
+    plt.ylim(0, max(label_counts) * 1.1)
+    plt.xticks(rotation=45)
+    plt.xlabel('Notes')
+    plt.ylabel('Count')
+    plt.title('Label Class Counts')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(f'saved_models/mnet/{model_name}/figs/label_class_counts.png'))
+    plt.close()
+
+    # '''
+    # Heatmap
+    # '''
+    # # Assuming note classes are structured as note + octave + duration
+    # # Create a DataFrame with multi-level indices
+    # notes = ['rest'] + [note + str(octave) for note in chromatic_notes for octave in range(6) for duration in range(4)]
+    # df = pd.DataFrame({'Note': label_note_classes, 'Count': label_counts.numpy()})
+
+    # # Example: Pivot table by note and octave
+    # # This requires parsing the note names appropriately
+    # # Adjust the parsing based on your actual note naming convention
+
+    # # Example parsing (assuming 'C56' where 'C' is note, '5' octave, '6' duration)
+    # df['NoteName'] = df['Note'].str.extract(r'([A-G]#?)')
+    # df['Octave'] = df['Note'].str.extract(r'[A-G]#?(\d)')
+    # df['Duration'] = df['Note'].str.extract(r'[A-G]#?\d(\d)')
+
+    # pivot = df.pivot_table(index='NoteName', columns='Octave', values='Count', aggfunc='sum', fill_value=0)
+
+    # plt.figure(figsize=(20, 10), dpi=300)
+    # sns.heatmap(pivot, annot=True, fmt="d", cmap="YlGnBu")
+    # plt.title('Label Note Counts Heatmap')
+    # plt.xlabel('Octave')
+    # plt.ylabel('Note')
+    # plt.tight_layout()
+    # plt.savefig('label_note_counts_heatmap.png')
+    # plt.close()
+
+
+
+# def create_dataloaders_mnet(subset: int=1):
+#     '''
+#     Creates training/testing dataloaders for MelodyNet model
+
+#     - chords: One-hot encoding of 84 possible chords (12 notes * 7 types)
+#         * [Amaj/min/dim/maj7/min7/dom7/min7b5 -> G#maj/min/dim/maj7/min7/dom7/min7b5]
+#         * [0    1   2   3    4    5    6     ... 77    78  79  80   81   82   83    ]
+#     - notes: Labels of 145 possible note/octave/lifespan combinations
+#         * [rest A2(0) A3(0) ... A6(1) A7(1) ... G#6(1) G#7(1)]
+#         * [0    1     2     ... 11    12    ... 143    144   ]
+#     '''
+#     # -- Parse data into songs list of dicts
+#     songs = parse_data(hnn_data=False)
+
+#     # -- Define chords one-hot size 
+#     num_chords = 84
+
+#     # -- Initialize note/chord one-hot encoding arrays to index from
+#     chord_enc_array = np.eye(num_chords, dtype=int)
+
+#     # -- Initialize empty inputs/labels arrays
+#     inputs_by_song = []
+#     labels_by_song = []
+
+#     for song in songs:
+
+#         song_inputs = []
+#         song_labels = []
+
+#         duration = 0
+
+#         for timestep, (note, chord) in enumerate(zip(song['notes'], song['chords'])):
+#             # -- Only take chord input at the beginning of 
+#             if duration == 0:
+#                 # -- Map chord to one-hot index (7 * note_idx + chord_type_idx)
+#                 chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
+#                 # -- Obtain chord input one-hot encoding
+#                 chord_input = chord_enc_array[chord_idx]
+
+#             # -- Map note to class label
+#             note_idx = NOTE_ENC_TO_IDX_REF.get(note[:2])
+#             note_octave = int(note[2])
+#             note_lifespan = int(note[3])
+
+#             # -- On a new note, append the input/label of the previous note
+#             if (note_lifespan == 0 or duration == 3) and timestep != 0:
+#                 # Rest note
+#                 if note_idx is None:
+#                     note_label = 0
+#                 else:
+#                     note_label = 1 + (note_idx * 24) + (note_octave - 2) + (duration * 6)
+
+#                 # -- Append chord to inputs & note to labels
+#                 song_inputs.append(chord_input)
+#                 song_labels.append(note_label)
+
+#                 duration = 0
+#             # -- If the note is sustained, track its duration
+#             elif note_lifespan == 1:
+#                 duration += 1
+
+
+#         # print(f"Chord Conversion:\n{[(chord_str, chord_enc) for chord_str, chord_enc in zip(song['chords'], song_inputs)]}\n")
+#         # print(f"Note Conversion:\n{[(note_str, note_label) for note_str, note_label in zip(song['notes'], song_labels)]}")
+
+#         # -- Convert song inputs/labels to tensors
+#         song_inputs = torch.tensor(np.array(song_inputs, dtype=np.float32))
+#         song_labels = torch.tensor(np.array(song_labels, dtype=np.int64))
+
+#         # -- Append song's inputs/labels to full list
+#         inputs_by_song.append(song_inputs)
+#         labels_by_song.append(song_labels)
+
+#         break
+
+#     # -- Randomly shuffle inputs/labels
+#     inputs_and_labels = list(zip(inputs_by_song, labels_by_song))
+    
+#     random.seed(42)
+#     random.shuffle(inputs_and_labels)
+
+#     inputs_by_song, labels_by_song = zip(*inputs_and_labels)
+
+#     # -- Create training/testing sets (80% train/20% test)
+#     num_train = int(0.8 * len(inputs_by_song))
+#     num_test = len(inputs_by_song) - num_train
+
+#     train_inputs, train_labels = inputs_by_song[:num_train // subset], labels_by_song[:num_train // subset]
+#     test_inputs, test_labels = inputs_by_song[num_train // subset:num_train // subset + num_test // subset], \
+#                                labels_by_song[num_train // subset:num_train // subset + num_test // subset]
+
+#     # -- Create training TensorDataset/DataLoader
+#     train_dataset = SongDataset(train_inputs, train_labels)
+#     train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+#     # -- Create testing TensorDataset/DataLoader
+#     test_dataset = SongDataset(test_inputs, test_labels)
+#     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+#     return train_dataloader, test_dataloader
+
+
+def create_dataloaders_mnet(subset: int=1, shuffle: bool=True, balance_feature: str=None):
+    '''
+    New create_dataloaders_mnet
+
+    - Add a chord/melody pair for each note, with the chord's octave and duration
+    - During training/testing, the timestep/meter units can be derived from the notes' durations
+    '''
+    songs = parse_data(hnn_data=False)
+
+    inputs_by_song = []
+    labels_by_song = []
+
+    note_duration = 0
+    current_note = None
+    current_chord = None
+
+    for song in songs:
+
+        song_duration = len(song['notes'])
+
+        chord_inputs = []
+        note_labels = []
+
+        for timestep, (note_enc, chord_enc) in enumerate(zip(song['notes'], song['chords'])):
+            
+            note_lifespan = note_enc[3]
+
+            # First note
+            if timestep == 0:
+                current_note = note_enc
+                current_chord = chord_enc
+
+                # Initialize duration to 1
+                note_duration = 1
+
+            else:
+                # New note
+                if note_lifespan == '0':
+                    # Track duration of consecutive rest notes
+                    if current_note == '0000' and note_enc == '0000':
+                        
+                        # Add rest notes on last note
+                        if timestep == song_duration - 1:
+                            note_duration += 1
+
+                            current_note = current_note[:3] + str(note_duration)
+
+                            note_labels.append(current_note)
+                            chord_inputs.append(current_chord)
+                            continue
+                        # If not the last note, increment duration and continue
+                        else:
+                            note_duration += 1
+                            continue
+
+                    # Update current note's lifespan to duration before storing
+                    current_note = current_note[:3] + str(note_duration)
+
+                    note_labels.append(current_note)
+                    chord_inputs.append(current_chord)
+
+                    # Update current note/chord to the next note
+                    current_note = note_enc
+                    current_chord = chord_enc
+
+                    # Initialize duration to 1
+                    note_duration = 1
+
+                # Sustained note
+                else:
+                    note_duration += 1
+
+                # Add current note on last note
+                if timestep == song_duration - 1:
+                    current_note = current_note[:3] + str(note_duration)
+
+                    note_labels.append(current_note)
+                    chord_inputs.append(current_chord)
+
+        inputs_by_song.append(chord_inputs)
+        labels_by_song.append(note_labels)
+
+
+    # -- Convert inputs_by_song/labels_by_song to DataLoaders
+    num_chord_classes = 84
+
+    chord_one_hot = np.eye(num_chord_classes, dtype=int)
+
+    input_data = []
+    label_data = []
+
+    for song_inputs, song_labels in zip(inputs_by_song, labels_by_song):
+        
+        song_input_data = []
+        song_label_data = []
+
+        for chord_input, note_label in zip(song_inputs, song_labels):
+            
+            chord_str = CHORD_ENC_TO_STR.get(chord_input)
+            chord_idx = CHORD_STR_TO_IDX_MNET.get(chord_str)
+            song_input_data.append(chord_one_hot[chord_idx])
+
+            note_str = NOTE_ENC_TO_NOTE_STR_REF.get(note_label[:2]) + note_label[2:]
+            note_idx = NOTE_STR_TO_IDX_MNET.get(note_str)
+            song_label_data.append(note_idx)
+
+        # Convert song inputs/labels to tensors
+        song_input_data = torch.tensor(np.array(song_input_data, dtype=np.float32))
+        song_label_data = torch.tensor(np.array(song_label_data, dtype=np.int64))
+
+        # Append to full list of songs
+        input_data.append(song_input_data)
+        label_data.append(song_label_data)
+
+    # -- Store song keys to evaluate key accuracy during testing
+    song_keys = [song['key'] for song in songs]
+
+    # -- Randomly shuffle inputs/labels
+    if shuffle:
+        inputs_and_labels = list(zip(input_data, label_data, song_keys))
+
+        random.seed(42)
+        random.shuffle(inputs_and_labels)
+
+        input_data, label_data, song_keys = zip(*inputs_and_labels)
+
+    # -- Create training/testing sets (80% train/20% test)
+    num_train = int(0.8 * len(input_data))
+    num_test = len(input_data) - num_train
+
+    train_inputs, train_labels = input_data[:num_train // subset], label_data[:num_train // subset]
+    test_inputs, test_labels = input_data[num_train // subset:num_train // subset + num_test // subset], \
+                               label_data[num_train // subset:num_train // subset + num_test // subset]
+    train_song_keys = song_keys[:num_train // subset]
+    test_song_keys = song_keys[num_train // subset:num_train // subset + num_test // subset]
+
+    # -- Create training TensorDataset/DataLoader
+    train_dataset = SongDataset(train_inputs, train_labels)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+    # -- Create testing TensorDataset/DataLoader
+    test_dataset = SongDataset(test_inputs, test_labels)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+    if balance_feature:
+        train_dataloader = balance_samples(train_dataloader, balance_feature)
+
+    return train_dataloader, test_dataloader, train_song_keys, test_song_keys
+
+
+def sum_duration(song_labels):
+    '''
+    Given a song's note class labels, returns the 
+    song's total duration
+    '''
+    song_duration = 0
+
+    note_idx_to_str = {v:k for k,v in NOTE_STR_TO_IDX_MNET.items()}
+
+    for song_label in song_labels:
+
+        # -- Convert song_label to note string
+        note_str = note_idx_to_str[song_label.item()]
+
+        # -- Get note duration
+        if note_str[1] == '#':
+            note_duration = int(note_str[3:])
+        else:
+            note_duration = int(note_str[2:])
+
+        song_duration += note_duration
+
+    return song_duration
+

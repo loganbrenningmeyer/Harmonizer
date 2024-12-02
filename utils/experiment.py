@@ -3,9 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as opt
 from torch.utils.data import DataLoader
+from collections import deque
 
 from models.hnn import HNN
 from models.mnet import MelodyNet
+from utils.data.mappings import *
+from utils.data.distributions import get_label_feature
 
 from tqdm import tqdm
 
@@ -35,41 +38,97 @@ def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, 
         # -- Accumulate loss per song
         song_loss = 0.0
 
-        # -- Iterate through each song timestep (each 1st/3rd beat)
-        for timestep in range(song_inputs.size(0)):
-            # Get melody input/chord label for current timestep
-            input_t = song_inputs[timestep].unsqueeze(0)
-            label_t = song_labels[timestep].unsqueeze(0)
+        # -- Accumulate repetition penalty from past 4 outputs
+        past_outputs = deque(maxlen=4)
 
-            # Define meter_units based on batch index
+        # -- Track timestep to determine meter units
+        timestep = 0
+
+        for sample_idx in range(song_inputs.size(0)):
+            # -- Get melody input/chord label for current timestep
+            input_t = song_inputs[sample_idx].unsqueeze(0)
+            label_t = song_labels[sample_idx].unsqueeze(0)
+
+            # -- Define meter_units based on batch index
             meter_units = F.one_hot(torch.arange(meter_size, dtype=torch.long))[timestep % meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
             meter_units = meter_units.expand((dataloader.batch_size, meter_size))                        # Create batch dimension
 
-            # Concatenate state_units, melody inputs, and meter_units
-            inputs = torch.cat([state_units, input_t, meter_units], dim=1)
+            # -- Inject noise if True
+            if isinstance(model, MelodyNet) and model.inject_noise:
+                if model.inject_noise:
+                    noise = torch.randn((1, model.noise_size)).to(device) * model.noise_weight
+                    # Concatenate state_units, melody inputs, and meter_units
+                    inputs = torch.cat([state_units, input_t, noise, meter_units], dim=1)
+            else:
+                # Concatenate state_units, melody inputs, and meter_units
+                inputs = torch.cat([state_units, input_t, meter_units], dim=1)
 
-            # Zero parameter gradients
+            # -- Zero parameter gradients
             optimizer.zero_grad()
-            # Forward pass
+
+            # -- Forward pass
             output = model(inputs)
-            # Compute loss
-            loss = criterion(output, label_t)
+
+            # -- Compute loss
+            if isinstance(model, HNN):
+                loss = criterion(output, label_t)
+            elif isinstance(model, MelodyNet) and model.repetition_weight != 0:
+                # Incorporate repetition penalty
+                output_idx = torch.argmax(output, dim=1)
+
+                repetitions = sum([(past_output == output_idx).sum().item() for past_output in past_outputs])
+
+                if len(past_outputs) > 0:
+                    repetition_penalty = (repetitions / len(past_outputs)) * model.repetition_weight
+                else:
+                    repetition_penalty = 0.0
+
+                past_outputs.append(output_idx)
+
+                loss = criterion(output, label_t) + repetition_penalty
+            else:
+                loss = criterion(output, label_t)
+                
+                # loss = criterion(output, label_t)
+
+                # Penalize incorrect predictions of rest notes
+                # _, pred_idx = torch.max(output, dim=1)
+
+                # if pred_idx.item() == 0 and label_t.item() != 0:
+                #     loss *= model.rest_loss_weight
+
+            # loss = criterion(output, label_t)
+
             song_loss += loss.item()
+
             # Backward pass
             loss.backward()
 
             # Zero fixed weight gradients
             if isinstance(model, HNN):
                 model.hidden2_from_melody.weight.grad.fill_diagonal_(0.0)
-            elif isinstance(model, MelodyNet):
-                model.hidden2_from_chord.weight.grad.fill_diagonal_(0.0)
+            elif isinstance(model, MelodyNet) and model.fixed_chords:
+                model.hidden2_from_chord.weight.grad.fill_diagonal_(0.0)                
 
             # Update weights
             optimizer.step()
 
             # Update state units w/ outputs softmax and normalize
-            state_units = F.softmax(output.detach(), dim=1).to(device) + model.state_units_decay * state_units
+            output_softmax = F.softmax(output.detach() / model.temperature, dim=1).to(device)
+
+            state_units = output_softmax + model.state_units_decay * state_units
             state_units = state_units / state_units.sum(dim=1, keepdim=True)
+
+            # Increment timestep by the duration of the label note
+            note_idx_to_str = {v:k for k,v in NOTE_STR_TO_IDX_MNET.items()}
+            note_str = note_idx_to_str[label_t.item()]
+
+            if note_str[1] == '#':
+                note_duration = int(note_str[3:])
+            else:
+                note_duration = int(note_str[2:])
+
+            timestep += note_duration
 
         # Add batch loss to total loss
         total_loss += song_loss
@@ -80,7 +139,7 @@ def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, 
     return epoch_loss
 
 
-def test(model: HNN | MelodyNet, dataloader: DataLoader, device: torch.device):
+def test(model: HNN | MelodyNet, dataloader: DataLoader, song_keys: list[str], device: torch.device):
 
     # -- Define meter units size based on model
     if isinstance(model, HNN):
@@ -92,9 +151,17 @@ def test(model: HNN | MelodyNet, dataloader: DataLoader, device: torch.device):
     model.eval()
 
     num_correct = 0
+    num_correct_keys = 0
+    num_correct_notes = 0
+
+    print(f"song_keys len: {len(song_keys)}")
+    print(f"dataloader len: {len(dataloader.dataset)}")
 
     # -- Iterate through testing DataLoader
-    for song_inputs, song_labels in tqdm(dataloader):
+    for song_idx, (song_inputs, song_labels) in tqdm(enumerate(dataloader)):
+        # -- Get song key for counting key-accurate predictions
+        song_key = NOTE_ENC_TO_NOTE_STR_REF.get(song_keys[song_idx])
+
         # -- Put song data onto device and add batch dim
         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
@@ -102,41 +169,68 @@ def test(model: HNN | MelodyNet, dataloader: DataLoader, device: torch.device):
         # -- Initialize state units to 0 (will update w/ outputs in loop)
         state_units = torch.zeros((1, model.output_size)).to(device)
 
-        # -- Iterate through each song timestep (each 1st/3rd beat)
-        for timestep in range(song_inputs.size(0)):
+        # -- Iterate through each song timestep
+        timestep = 0
+
+        while timestep < song_inputs.size(0):
             # Get melody input/chord label for current timestep
             input_t = song_inputs[timestep].unsqueeze(0)
             label_t = song_labels[timestep].unsqueeze(0)
 
-            # Define meter_units based on batch index
+            # Define meter_units based on timestep
             meter_units = F.one_hot(torch.arange(meter_size, dtype=torch.long))[timestep % meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
             meter_units = meter_units.expand((dataloader.batch_size, meter_size))                        # Create batch dimension
 
-            # Concatenate state_units, melody inputs, and meter_units
-            inputs = torch.cat([state_units, input_t, meter_units], dim=1)
-
-            # print(f"inputs: {inputs}")
+            # Inject noise if True
+            if isinstance(model, MelodyNet) and model.inject_noise:
+                noise = torch.randn((1, model.noise_size)).to(device) * model.noise_weight
+                # Concatenate state_units, melody inputs, and meter_units
+                inputs = torch.cat([state_units, input_t, noise, meter_units], dim=1)
+            else:
+                # Concatenate state_units, melody inputs, and meter_units
+                inputs = torch.cat([state_units, input_t, meter_units], dim=1)
 
             # Forward pass
             output = model(inputs)
 
-            # Determine if chord prediction is correct
-            # print(f"label_t: {label_t}, output: {output}")
-
             label_idx = label_t.item()
-            chord_idx = torch.argmax(output.detach().squeeze(0)).item()
+            pred_idx = torch.argmax(output.detach().squeeze(0)).item()
 
-            # print(f"label_idx: {label_idx}, chord_idx: {chord_idx}")
-
-            if chord_idx == label_idx:
+            # -- Count number of correct label predictions
+            if pred_idx == label_idx:
                 num_correct += 1
+
+            # -- Count number of predictions in the right key
+            pred_note = get_label_feature(pred_idx, 'notes')
+            label_note = get_label_feature(label_idx, 'notes')
+
+            if pred_note in KEY_NOTES.get(song_key) or pred_note == 'R':
+                num_correct_keys += 1
+
+            # -- Count number of predictions of the right note (even if octave is wrong)
+            if pred_note == label_note:
+                num_correct_notes += 1
 
             # Update state units
             state_units = F.softmax(output, dim=1) + model.state_units_decay * state_units
             state_units = state_units / state_units.sum(dim=1, keepdim=True)
 
+            # Increment timestep by the duration of the label note
+            note_idx_to_str = {v:k for k,v in NOTE_STR_TO_IDX_MNET.items()}
+            note_str = note_idx_to_str[label_t.item()]
+
+            if note_str[1] == '#':
+                note_duration = int(note_str[3:])
+            else:
+                note_duration = int(note_str[2:])
+
+            timestep += note_duration 
+
     # -- Compute testing accuracy
     total_samples = sum([len(song_inputs[0]) for song_inputs, _ in dataloader])
-    accuracy = num_correct / total_samples
 
-    return accuracy
+    accuracy = num_correct / total_samples
+    key_accuracy = num_correct_keys / total_samples
+    note_accuracy = num_correct_notes / total_samples
+
+    return accuracy, key_accuracy, note_accuracy
