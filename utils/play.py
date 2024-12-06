@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 from utils.data.mappings import *
-from utils.data.load_data import get_songs_notes, get_songs_chords
+from utils.data.load_data import get_songs_notes, get_songs_chords, parse_data
 
 # -- Define constants for playback
 SAMPLE_RATE = 44100
@@ -125,10 +125,14 @@ def play_song_mnet(model_path: str, song_idx: int, note_duration: float,
     mnet = torch.load(model_path, map_location=device)
     mnet.eval()
 
-    # -- Get chord encodings of specified song_idx
-    song_chords = get_songs_chords()[song_idx]
+    # -- Get key/chord encodings of specified song_idx
+    song_data = parse_data(hnn_data=False)[song_idx]
+    song_chords = song_data['chords']
+    song_key = song_data['key']
+    # song_chords = get_songs_chords()[song_idx]
 
-    print(len(song_chords))
+    print(f"Song Length: {len(song_chords)}")
+    print(f"Song Key: {song_key}, Notes: {KEY_NOTES.get(song_key)}")
 
     # -- Initialize chord one-hot encoding arrays to index from
     chord_one_hot_array = torch.eye(mnet.chord_size, dtype=int)
@@ -214,16 +218,19 @@ def play_song_mnet(model_path: str, song_idx: int, note_duration: float,
         note_str_label = note_idx_to_str[note_idx]
 
         if note_str_label[0] == 'R':
+            note = 'R'
             note_str = None
             note_dur = int(note_str_label[2:])
         elif note_str_label[1] == '#':
+            note = note_str_label[:2]
             note_str = note_str_label[:3]
             note_dur = int(note_str_label[3:])
         else:
+            note = note_str_label[0]
             note_str = note_str_label[:2]
             note_dur = int(note_str_label[2:])
 
-        print(f"chord: {chord_str}, note: {note_str}, duration: {note_dur}")
+        print(f"chord: {chord_str}, note: {note_str}, duration: {note_dur}, in_key: {note in KEY_NOTES.get(song_key)}, harmonizes: {note in HARMONIZING_NOTES.get(chord_str)}")
 
         # Play chord when it changes
         if chord_str != current_chord_str:

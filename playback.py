@@ -4,7 +4,7 @@ from utils.play import play_song_hnn, play_song_mnet
 import random
 
 NOTE_DURATION_HNN = 0.75
-NOTE_DURATION_MNET = 0.2
+NOTE_DURATION_MNET = 0.15
 
 '''
 Run from Command Prompt to support audio output
@@ -132,15 +132,38 @@ def mnet_main():
     no_melody = 'saved_models/mnet/no_melody/weights/epoch1.pth'
     no_chords_no_melody = 'saved_models/mnet/no_chords_no_melody/weights/epoch1.pth'
     chords_and_melody = 'saved_models/mnet/chords_and_melody/weights/epoch1.pth'
+
+    why_not = 'saved_models/mnet/why_not/weights/epoch1.pth'
+    why_not_take2 = 'saved_models/mnet/why_not_take2/weights/epoch1.pth'
+    why_not_take2_full = 'saved_models/mnet/why_not_take2_full/weights/epoch1.pth'
+
+    key_loss = 'saved_models/mnet/key_loss/weights/epoch1.pth'
+    key_loss_no_mel = 'saved_models/mnet/key_loss_no_mel/weights/epoch1.pth'
+    high_key_no_fixed = 'saved_models/mnet/high_key_no_fixed/weights/epoch1.pth'
     
+    minor_key_fix = 'saved_models/mnet/minor_key_fix/weights/epoch1.pth'
+    harmony_loss = 'saved_models/mnet/harmony_loss/weights/epoch1.pth'
+    harmony_loss_high_rep = 'saved_models/mnet/harmony_loss_high_rep/weights/epoch1.pth'
+    high_rep_med_harmony_med_key = 'saved_models/mnet/high_rep_med_harmony_med_key/weights/epoch1.pth'
+    very_high_loss = 'saved_models/mnet/very_high_loss/weights/epoch1.pth'
+    
+    extremely_high_loss = 'saved_models/mnet/extremely_high_loss/weights/epoch2.pth'
+    high_loss = 'saved_models/mnet/high_loss/weights/epoch2.pth'
+    med_loss = 'saved_models/mnet/med_loss/weights/epoch2.pth' #1683
+    low_loss = 'saved_models/mnet/low_loss/weights/epoch2.pth'
+    extremely_low_loss = 'saved_models/mnet/extremely_low_loss/weights/epoch2.pth'
+    
+    no_key = 'saved_models/mnet/no_key/weights/epoch2.pth' #1549
+    no_key_durations = 'saved_models/mnet/no_key_durations/weights/epoch1.pth'
+    no_key_no_decay = 'saved_models/mnet/no_key_no_decay/weights/epoch1.pth'
     '''
     Pick Random song and playback (5167 MelodyNet compatible songs)
     '''
     song_idx = random.randint(0, 5166)
 
     play_song_mnet(
-        model_path=notes_octaves_balance_high_mel_rep_low_lr,
-        song_idx=1900,
+        model_path=no_key_no_decay,
+        song_idx=1683,
         note_duration=NOTE_DURATION_MNET,
         topk=0,
         multinomial=False

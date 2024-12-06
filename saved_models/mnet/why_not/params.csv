@@ -1,0 +1,2 @@
+hidden1_size,lr,weight_decay,repetition_weight,chord_weight,melody_weight,fixed_chords,fixed_melody,state_units_decay,rest_fixed_weight,rest_loss_weight,inject_noise,noise_size,noise_weight,temperature,dropout_rate,balance_feature
+256,0.01,0.0,250.0,5.0,5.0,True,True,0.75,0.5,0.0,False,0,0.0,15.0,0.5,

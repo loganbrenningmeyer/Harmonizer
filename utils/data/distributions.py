@@ -221,7 +221,12 @@ def balance_samples(dataloader: DataLoader, label_feature: str):
     song_weights = [weight / total_weight for weight in song_weights]
 
     # -- Create WeightedRandomSampler
-    sampler = WeightedRandomSampler(song_weights, num_samples=len(song_weights), replacement=True)
+    generator = torch.Generator()
+    generator.manual_seed(42)
+    sampler = WeightedRandomSampler(song_weights, 
+                                    num_samples=len(song_weights), 
+                                    replacement=True,
+                                    generator=generator)
 
     # -- Create new balanced dataloader
     balanced_dataloader = DataLoader(dataloader.dataset, batch_size=1, sampler=sampler)

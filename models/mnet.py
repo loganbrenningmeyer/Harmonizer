@@ -189,7 +189,8 @@ Output Layer:
     
 
 class MelodyNet(nn.Module):
-    def __init__(self, hidden1_size: int, lr: float, weight_decay: float, repetition_weight: float,
+    def __init__(self, hidden1_size: int, lr: float, weight_decay: float, 
+                       repetition_loss: float, key_loss: float, harmony_loss: float,
                        chord_weight: float, melody_weight: float, state_units_decay: float,
                        fixed_chords: bool, fixed_melody: bool,
                        rest_fixed_weight: float, rest_loss_weight: float,
@@ -226,8 +227,10 @@ class MelodyNet(nn.Module):
         self.hidden2_size = 84
         self.output_size = self.melody_size
 
-        # -- Define repetition penalty weight
-        self.repetition_weight = repetition_weight
+        # -- Define loss penalties
+        self.repetition_loss = repetition_loss
+        self.key_loss = key_loss
+        self.harmony_loss = harmony_loss
 
         # -- Define optimizer parameters
         self.lr = lr 

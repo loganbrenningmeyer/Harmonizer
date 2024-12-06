@@ -106,6 +106,7 @@ def parse_data(hnn_data: bool):
 
     # -- Initialize key/song dict to determine song changes
     curr_key = None
+
     # song = dict of 1st/3rd beat notes/chords for full song
     song = {
         'key': None,
@@ -114,6 +115,7 @@ def parse_data(hnn_data: bool):
     }
 
     for bar_group in bar_groups:
+
         # -- Use regex to extract key, chords, and notes
         re_match = pattern.match(bar_group)
 
@@ -122,29 +124,34 @@ def parse_data(hnn_data: bool):
         chords = re_match.group('chords').split('*')[:-1]
         notes = [bar_notes.split('-') for bar_notes in re_match.group('notes').split('+')]
 
+        # -- If it's the first iteration, update curr_key
+        if curr_key is None:
+            curr_key = key
+
         # -- Begin a new song when the key changes
         if key != curr_key:
 
-            song['key'] = key
+            song['key'] = get_song_key(curr_key, song['notes'])
 
-            # If it isn't the first iteration...
-            if curr_key is not None:
-                # If only using reference model chords (maj & dom7) check compatibility
-                if hnn_data:
-                    if is_compatible(song):
-                        songs.append(song)
-                # If not using reference model chords, return any song
-                else:
+            # If only using reference model chords (maj & dom7) check compatibility
+            if hnn_data:
+                if is_compatible(song):
                     songs.append(song)
+            # If not using reference model chords, return any song
+            else:
+                songs.append(song)
             
             # Reset song dict
             song = {
+                'key': None,
                 'notes': [],
                 'chords': []
             }
 
             # Update curr_key
             curr_key = key
+
+            
 
         # HNN Model (Melody -> Chord)
         if hnn_data:
@@ -169,6 +176,31 @@ def parse_data(hnn_data: bool):
             song['notes'].extend([note for bar_notes in notes for note in bar_notes])
 
     return songs
+
+
+def get_song_key(key_note: str, song_notes: list[str]):
+    '''
+    Given a song's root key note (A, A#, etc.), determines if
+    the key is major or minor based on which type shares more notes
+    with the song
+    '''
+    key_note_str = NOTE_ENC_TO_NOTE_STR_REF.get(key_note)
+    song_notes_str = set([NOTE_ENC_TO_NOTE_STR_REF.get(song_note[:2]) for song_note in song_notes])
+    
+    major_notes = KEY_NOTES.get(key_note_str + 'major')
+    minor_notes = KEY_NOTES.get(key_note_str + 'minor')
+
+    major_count = sum([major_note == song_note for major_note in major_notes for song_note in song_notes_str])
+    minor_count = sum([minor_note == song_note for minor_note in minor_notes for song_note in song_notes_str])
+
+    if major_count > minor_count:
+        key_type = 'major'
+    elif minor_count > major_count:
+        key_type = 'minor'
+    else:
+        key_type = 'major'
+
+    return key_note_str + key_type
 
 
 def get_songs_chords():

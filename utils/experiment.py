@@ -7,13 +7,14 @@ from collections import deque
 
 from models.hnn import HNN
 from models.mnet import MelodyNet
+from utils.data.load_data import get_song_key
 from utils.data.mappings import *
 from utils.data.distributions import get_label_feature
 
 from tqdm import tqdm
 
 
-def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
+def train(model: HNN | MelodyNet, dataloader: DataLoader, keys: list[str], criterion: nn.Module, optimizer: opt.Optimizer, device: torch.device):
 
     # -- Define meter units size based on model
     if isinstance(model, HNN):
@@ -27,7 +28,10 @@ def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, 
     total_loss = 0.0
 
     # -- Iterate through DataLoader batches (each batch is a song)
-    for song_inputs, song_labels in tqdm(dataloader):
+    for song_key, (song_inputs, song_labels) in tqdm(zip(keys, dataloader), total=len(dataloader)):
+        # -- Convert song key encoding to note string (e.g. 'A')
+        # song_key_str = NOTE_ENC_TO_NOTE_STR_REF.get(song_key)
+
         # -- Put song data onto device and remove batch dim
         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
         song_labels = song_labels.squeeze(0).to(device)  # Shape: [sequence_length]
@@ -70,24 +74,64 @@ def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, 
             output = model(inputs)
 
             # -- Compute loss
-            if isinstance(model, HNN):
-                loss = criterion(output, label_t)
-            elif isinstance(model, MelodyNet) and model.repetition_weight != 0:
-                # Incorporate repetition penalty
-                output_idx = torch.argmax(output, dim=1)
+            loss = criterion(output, label_t)
 
-                repetitions = sum([(past_output == output_idx).sum().item() for past_output in past_outputs])
+            if isinstance(model, MelodyNet):
+                # Determine predicted output class (as tensor)
+                output_idx = torch.argmax(output, dim=1).item()
 
-                if len(past_outputs) > 0:
-                    repetition_penalty = (repetitions / len(past_outputs)) * model.repetition_weight
-                else:
-                    repetition_penalty = 0.0
+                # Add repetition penalty
+                if model.repetition_loss != 0:
+                    repetitions = sum([past_output == output_idx for past_output in past_outputs])
 
-                past_outputs.append(output_idx)
+                    if len(past_outputs) > 0:
+                        repetition_penalty = (repetitions / len(past_outputs)) * model.repetition_loss
+                    else:
+                        repetition_penalty = 0.0
 
-                loss = criterion(output, label_t) + repetition_penalty
-            else:
-                loss = criterion(output, label_t)
+                    past_outputs.append(output_idx)
+
+                    loss += repetition_penalty
+
+                # Add key penalty
+                if model.key_loss != 0:
+                    # Convert note and key to strings
+                    output_note = get_label_feature(output_idx, 'notes')
+
+                    song_key_str = get_song_key(song_key, song_labels)
+
+                    if output_note not in KEY_NOTES.get(song_key_str) and output_note != 'R':
+                        loss += model.key_loss
+
+                # Add chord harmony penalty
+                if model.harmony_loss != 0:
+                    # Convert output note/chord to strings
+                    output_note = get_label_feature(output_idx, 'notes')
+                    
+                    chord_idx_to_str = {v:k for k,v in CHORD_STR_TO_IDX_MNET.items()}
+                    chord_idx = torch.argmax(input_t, dim=1).item()
+                    chord = chord_idx_to_str[chord_idx]
+
+                    if output_note not in HARMONIZING_NOTES.get(chord):
+                        loss += model.harmony_loss
+
+
+            # if isinstance(model, HNN):
+            #     loss = criterion(output, label_t)
+            # elif isinstance(model, MelodyNet) and model.repetition_weight != 0:
+
+            #     repetitions = sum([(past_output == output_idx).sum().item() for past_output in past_outputs])
+
+            #     if len(past_outputs) > 0:
+            #         repetition_penalty = (repetitions / len(past_outputs)) * model.repetition_weight
+            #     else:
+            #         repetition_penalty = 0.0
+
+            #     past_outputs.append(output_idx)
+
+            #     loss = criterion(output, label_t) + repetition_penalty
+            # else:
+            #     loss = criterion(output, label_t)
                 
                 # loss = criterion(output, label_t)
 
@@ -139,7 +183,7 @@ def train(model: HNN | MelodyNet, dataloader: DataLoader, criterion: nn.Module, 
     return epoch_loss
 
 
-def test(model: HNN | MelodyNet, dataloader: DataLoader, song_keys: list[str], device: torch.device):
+def test(model: HNN | MelodyNet, dataloader: DataLoader, keys: list[str], device: torch.device):
 
     # -- Define meter units size based on model
     if isinstance(model, HNN):
@@ -154,13 +198,11 @@ def test(model: HNN | MelodyNet, dataloader: DataLoader, song_keys: list[str], d
     num_correct_keys = 0
     num_correct_notes = 0
 
-    print(f"song_keys len: {len(song_keys)}")
+    print(f"keys len: {len(keys)}")
     print(f"dataloader len: {len(dataloader.dataset)}")
 
     # -- Iterate through testing DataLoader
-    for song_idx, (song_inputs, song_labels) in tqdm(enumerate(dataloader)):
-        # -- Get song key for counting key-accurate predictions
-        song_key = NOTE_ENC_TO_NOTE_STR_REF.get(song_keys[song_idx])
+    for song_key, (song_inputs, song_labels) in tqdm(zip(keys, dataloader), total=len(dataloader)):
 
         # -- Put song data onto device and add batch dim
         song_inputs = song_inputs.squeeze(0).to(device)  # Shape: [sequence_length, input_size]
@@ -204,7 +246,9 @@ def test(model: HNN | MelodyNet, dataloader: DataLoader, song_keys: list[str], d
             pred_note = get_label_feature(pred_idx, 'notes')
             label_note = get_label_feature(label_idx, 'notes')
 
-            if pred_note in KEY_NOTES.get(song_key) or pred_note == 'R':
+            song_key_str = get_song_key(song_key, song_labels)
+
+            if pred_note in KEY_NOTES.get(song_key_str) or pred_note == 'R':
                 num_correct_keys += 1
 
             # -- Count number of predictions of the right note (even if octave is wrong)

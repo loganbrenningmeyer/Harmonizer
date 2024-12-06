@@ -212,21 +212,30 @@ def mnet_main():
 
     '''
     Create DataLoaders
-    '''
-    balance_feature = None
 
-    train_dataloader, test_dataloader, train_song_keys, test_song_keys = create_dataloaders_mnet(balance_feature=balance_feature)
+    Available balance_feature options:
+    - 'classes'
+    - 'notes'
+    - 'octaves'
+    - 'notes_octaves'
+    - 'durations'
+    '''
+    balance_feature = 'notes_octaves'
+
+    train_dataloader, test_dataloader, train_song_keys, test_song_keys = create_dataloaders_mnet(balance_feature=balance_feature,
+                                                                                             subset=1)
 
     '''
     Create MelodyNet Model
     '''
-    mnet = MelodyNet(hidden1_size=512, lr=0.05, weight_decay=0.0, repetition_weight=250.0,
-                     chord_weight=15.0, melody_weight=15.0, state_units_decay=0.5, 
+    mnet = MelodyNet(hidden1_size=1024, lr=0.05, weight_decay=0.0, 
+                     repetition_loss=500.0, key_loss=500.0, harmony_loss=750.0,
+                     chord_weight=10.0, melody_weight=15.0, state_units_decay=0.5, 
                      fixed_chords=False, fixed_melody=False,
-                     rest_fixed_weight=0.2, rest_loss_weight=0.0,
+                     rest_fixed_weight=0.25, rest_loss_weight=0.0,
                      inject_noise=False, noise_size=100, noise_weight=1.0,
                      temperature=10.0, dropout_rate=0.5,
-                     model_name='no_chords_no_melody')
+                     model_name='med_loss_no_fixed')
 
     # -- Put model on device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -249,14 +258,19 @@ def mnet_main():
         'hidden1_size': mnet.hidden1_size,
         'lr': mnet.lr,
         'weight_decay': mnet.weight_decay,
-        'repetition_weight': mnet.repetition_weight,
+        'state_units_decay': mnet.state_units_decay,
+
+        'repetition_loss': mnet.repetition_loss,
+        'key_loss': mnet.key_loss,
+        'harmony_loss': mnet.harmony_loss,
+        'rest_fixed_weight': mnet.rest_fixed_weight,
+        'rest_loss_weight': mnet.rest_loss_weight,
+
         'chord_weight': mnet.chord_weight,
         'melody_weight': mnet.melody_weight,
         'fixed_chords': mnet.fixed_chords,
         'fixed_melody': mnet.fixed_melody,
-        'state_units_decay': mnet.state_units_decay,
-        'rest_fixed_weight': mnet.rest_fixed_weight,
-        'rest_loss_weight': mnet.rest_loss_weight,
+
         'inject_noise': mnet.inject_noise,
         'noise_size': mnet.noise_size,
         'noise_weight': mnet.noise_weight,
@@ -265,8 +279,8 @@ def mnet_main():
         'balance_feature': balance_feature
     }
 
-    df = pd.DataFrame(params, index=[0])
-    df.to_csv(f'saved_models/mnet/{mnet.model_name}/params.csv', index=False)
+    df = pd.DataFrame(list(params.items()), columns=['Parameter', 'Value'])
+    df.to_csv(f'saved_models/mnet/{mnet.model_name}/params.csv', index=False, header=False)
     print(f"Saved {mnet.model_name} params.csv to saved_models/mnet/{mnet.model_name}/params.csv.")
     
     '''
@@ -282,10 +296,10 @@ def mnet_main():
 
     print(f"\n-- Training {mnet.model_name}...\n")
 
-    epochs = 1
+    epochs = 5
     for epoch in range(1, epochs + 1):
         # -- Train for an epoch and store epoch loss
-        epoch_loss = train(mnet, train_dataloader, criterion, optimizer, device)
+        epoch_loss = train(mnet, train_dataloader, train_song_keys, criterion, optimizer, device)
         train_losses.append(epoch_loss)
         print(f"-- Epoch {epoch}/{epochs}, Loss: {epoch_loss:.4f}")
 
@@ -414,7 +428,8 @@ def mnet_main():
 
 
 if __name__ == "__main__":
-    # mnet_main()
+    mnet_main()
+    # parse_data(hnn_data=False)
 
     # compare_plots()
 
@@ -449,31 +464,31 @@ if __name__ == "__main__":
     '''
     plot_counts()
     '''
-    train_dataloader, test_dataloader, train_song_keys, test_song_keys = create_dataloaders_mnet()
+    # train_dataloader, test_dataloader, train_song_keys, test_song_keys = create_dataloaders_mnet()
 
-    label_features = ['classes', 'notes', 'octaves', 'notes_octaves', 'durations']
+    # label_features = ['classes', 'notes', 'octaves', 'notes_octaves', 'durations']
 
-    for label_feature in label_features:
+    # for label_feature in label_features:
 
-        orig_save_dir = f'figs/distributions/mnet/{label_feature}/original'
-        new_save_dir = f'figs/distributions/mnet/{label_feature}/balanced'
+    #     orig_save_dir = f'figs/distributions/mnet/{label_feature}/original'
+    #     new_save_dir = f'figs/distributions/mnet/{label_feature}/balanced'
 
-        os.makedirs(orig_save_dir, exist_ok=True)
-        os.makedirs(new_save_dir, exist_ok=True)
+    #     os.makedirs(orig_save_dir, exist_ok=True)
+    #     os.makedirs(new_save_dir, exist_ok=True)
 
-        print(f"balancing {label_feature}...")
+    #     print(f"balancing {label_feature}...")
 
-        # -- Original dataloader
-        orig_counts = count_samples(train_dataloader)
+    #     # -- Original dataloader
+    #     orig_counts = count_samples(train_dataloader)
         
-        plot_counts(orig_counts, label_feature, orig_save_dir)
+    #     plot_counts(orig_counts, label_feature, orig_save_dir)
 
-        # -- Balanced dataloader
-        balanced_train_dataloader = balance_samples(train_dataloader, label_feature)
+    #     # -- Balanced dataloader
+    #     balanced_train_dataloader = balance_samples(train_dataloader, label_feature)
 
-        balanced_counts = count_samples(balanced_train_dataloader)
+    #     balanced_counts = count_samples(balanced_train_dataloader)
 
-        plot_counts(balanced_counts, label_feature, True, new_save_dir)
+    #     plot_counts(balanced_counts, label_feature, True, new_save_dir)
 
     # plot_fonts()
 
