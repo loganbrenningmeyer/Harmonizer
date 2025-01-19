@@ -1,0 +1,10 @@
+hidden1_size,1024
+lr,0.01
+weight_decay,0.0
+chord_weight,10.0
+melody_weight,15.0
+rest_fixed_weight,0.25
+fixed_chords,True
+fixed_melody,True
+dropout_rate,0.0
+balance_feature,notes_octaves

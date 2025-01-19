@@ -1,0 +1,2 @@
+train_loss,train_accuracy,train_key_accuracy,train_note_accuracy,test_accuracy,test_key_accuracy,test_note_accuracy
+27856.040360463165,1.2149488301922653,0.0,6.015941934295947,1.0420526471010823,0.0,5.288908718305493

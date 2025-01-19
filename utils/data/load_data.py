@@ -710,6 +710,9 @@ def create_dataloaders_mnet(subset: int=1, shuffle: bool=True, balance_feature: 
         inputs_by_song.append(chord_inputs)
         labels_by_song.append(note_labels)
 
+    # print(f"inputs_by_song: {inputs_by_song[0]}")
+    # print(f"labels_by_song: {labels_by_song[0]}")
+
 
     # -- Convert inputs_by_song/labels_by_song to DataLoaders
     num_chord_classes = 84
@@ -802,3 +805,177 @@ def sum_duration(song_labels):
 
     return song_duration
 
+
+
+def parse_formatted_data(strings: bool = False):
+    '''
+    New create_dataloaders_mnet
+
+    - Add a chord/melody pair for each note, with the chord's octave and duration
+    - During training/testing, the timestep/meter units can be derived from the notes' durations
+    '''
+    songs = parse_data(hnn_data=False)
+
+    notes = []
+    chords = []
+
+    note_duration = 0
+    current_note = None
+    current_chord = None
+
+    for song in songs:
+
+        song_duration = len(song['notes'])
+
+        chord_inputs = []
+        note_labels = []
+
+        for timestep, (note_enc, chord_enc) in enumerate(zip(song['notes'], song['chords'])):
+            
+            note_lifespan = note_enc[3]
+
+            # First note
+            if timestep == 0:
+                current_note = note_enc
+                current_chord = chord_enc
+
+                # Initialize duration to 1
+                note_duration = 1
+
+            else:
+                # New note
+                if note_lifespan == '0':
+                    # Track duration of consecutive rest notes
+                    if current_note == '0000' and note_enc == '0000':
+                        
+                        # Add rest notes on last note
+                        if timestep == song_duration - 1:
+                            note_duration += 1
+
+                            current_note = current_note[:3] + str(note_duration)
+
+                            # -- Convert notes/chords to strings
+                            if strings:
+                                note_labels.append(NOTE_ENC_TO_NOTE_STR_REF.get(current_note[:2]))
+                                chord_inputs.append(CHORD_ENC_TO_STR.get(current_chord))
+                            # -- Keep as encodings
+                            else:
+                                note_labels.append(current_note)
+                                chord_inputs.append(current_chord)
+
+                            continue
+                        # If not the last note, increment duration and continue
+                        else:
+                            note_duration += 1
+                            continue
+
+                    # Update current note's lifespan to duration before storing
+                    current_note = current_note[:3] + str(note_duration)
+
+                    # -- Convert notes/chords to strings
+                    if strings:
+                        note_labels.append(NOTE_ENC_TO_NOTE_STR_REF.get(current_note[:2]))
+                        chord_inputs.append(CHORD_ENC_TO_STR.get(current_chord))
+                    # -- Keep as encodings
+                    else:
+                        note_labels.append(current_note)
+                        chord_inputs.append(current_chord)
+
+                    # Update current note/chord to the next note
+                    current_note = note_enc
+                    current_chord = chord_enc
+
+                    # Initialize duration to 1
+                    note_duration = 1
+
+                # Sustained note
+                else:
+                    note_duration += 1
+
+                # Add current note on last note
+                if timestep == song_duration - 1:
+                    current_note = current_note[:3] + str(note_duration)
+
+                    # -- Convert notes/chords to strings
+                    if strings:
+                        note_labels.append(NOTE_ENC_TO_NOTE_STR_REF.get(current_note[:2]))
+                        chord_inputs.append(CHORD_ENC_TO_STR.get(current_chord))
+                    # -- Keep as encodings
+                    else:
+                        note_labels.append(current_note)
+                        chord_inputs.append(current_chord)
+
+        notes.append(note_labels)
+        chords.append(chord_inputs)
+            
+    return notes, chords
+
+
+
+def create_dataloaders_mnetRL(subset: int=1, shuffle: bool=True):
+    '''
+    Creates DataLoaders for RL mnet implementation
+    - All inputs at 16th-beat granularity to allow the model to progress
+      through timesteps according to its actions
+
+    - Labels are irrelevant; the RL model does not train on Cross Entropy Loss
+    '''
+    songs = parse_data(hnn_data=False)
+
+    input_data = []
+    label_data = []
+
+    for song in songs:
+
+        song_input_data = []
+        song_label_data = []
+
+        num_chord_classes = 84
+        chord_one_hot = np.eye(num_chord_classes, dtype=int)
+
+        for chord_enc, note_enc in zip(song['chords'], song['notes']):
+            '''
+            Convert all chords to one-hot encodings
+            Convert all notes to integer class labels
+            '''
+            chord_str = CHORD_ENC_TO_STR.get(chord_enc)
+            chord_idx = CHORD_STR_TO_IDX_MNET.get(chord_str)
+            song_input_data.append(chord_one_hot[chord_idx])
+
+            # -- Note labels are arbitrary--simply set each to 0
+            song_label_data.append(0)
+
+        # -- Convert song inputs/labels to tensors
+        song_input_data = torch.tensor(np.array(song_input_data, dtype=np.float32))
+        song_label_data = torch.tensor(np.array(song_label_data, dtype=np.int64))
+
+        # -- Append to full list of songs
+        input_data.append(song_input_data)
+        label_data.append(song_label_data)
+
+    # -- Randomly shuffle songs
+    if shuffle:
+        inputs_and_labels = list(zip(input_data, label_data))
+
+        random.seed(42)
+        random.shuffle(inputs_and_labels)
+
+        input_data, label_data = zip(*inputs_and_labels)
+
+    # -- Create training/testing sets (80/20)
+    num_train = int(0.8 * len(input_data))
+    num_test = len(input_data) - num_train
+
+    train_inputs, train_labels = input_data[:num_train // subset], label_data[:num_train // subset]
+    test_inputs, test_labels = input_data[num_train // subset:num_train // subset + num_test // subset], \
+                               label_data[num_train // subset:num_train // subset + num_test // subset]
+
+    # -- Create training TensorDataset/DataLoader
+    train_dataset = SongDataset(train_inputs, train_labels)
+    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+    # -- Create testing TensorDataset/DataLoader
+    test_dataset = SongDataset(test_inputs, test_labels)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+    return train_dataloader, test_dataloader

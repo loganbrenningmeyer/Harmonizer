@@ -3,10 +3,15 @@ from torch.utils.data import DataLoader
 from torch.utils.data import WeightedRandomSampler
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import os
-
 from collections import Counter
 
+# -- Dissonance Level Distribution Calculations
+import torch.distributions as dist
+from scipy.stats import entropy
+
+from utils.data.load_data import *
 from utils.data.mappings import *
 
 '''
@@ -149,12 +154,12 @@ def plot_counts(sample_counts: dict, label_feature: str, balanced: bool, save_di
     feature_labels = counts_dict.keys()
 
     # -- Create bar plot of sample feature counts
-    plt.figure(figsize=(20, 10), facecolor=fig_color)
-    plt.axes().set_facecolor(fig_color)
+    plt.figure(figsize=(15, 10)) #, facecolor=fig_color)
+    # plt.axes().set_facecolor(fig_color)
 
     if label_feature != 'classes':
-        label_positions = np.arange(len(feature_labels)) * 100
-        plt.bar(label_positions, counts_dict.values(), width=75, color=bar_color)
+        label_positions = np.arange(len(feature_labels)) # * 100
+        plt.bar(label_positions, counts_dict.values(), color=bar_color)
     else:
         plt.bar(feature_labels, counts_dict.values(), color=bar_color)
 
@@ -171,6 +176,8 @@ def plot_counts(sample_counts: dict, label_feature: str, balanced: bool, save_di
     plt.xlabel(label_feature.capitalize().replace('_', '/'), fontname=fontname, fontweight='bold', fontsize=16)
     plt.ylabel('Count', fontname=fontname, fontweight='bold', fontsize=16)
 
+    plt.xlim((-1, 15.5))
+    
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{label_feature}_distribution.png'), dpi=300)
 
@@ -261,3 +268,184 @@ def get_label_feature(label: int, label_feature: str):
         return label_note_octave
     elif label_feature == 'durations':
         return label_duration
+    
+
+def note_distributions():
+    '''
+    Returns the average sorted note distributions for 3 levels of dissonance:
+
+    Chord Tones
+    - A note is a Chord Tone if it can be found
+    within CHORD_TONES[chord]
+
+    Scale Non-Chord Tones
+    - A note is a Scale Non-Chord Tone if it is not
+    a Chord Tone, but can be found in HARMONIZING_NOTES[chord]
+    
+    Dissonant Tones
+    - A note is a Dissonant Tone if it is neither a
+    Chord Tone nor a Scale Non-Chord Tone
+            
+    
+    All distributions have a fixed bin count of 12, achieved by padding missing
+    bins with 0s
+
+    Returns:
+    - chord_tones, scale_tones, diss_tones: The dataset's average sorted probability
+      distributions for each level of dissonance
+    '''
+    # -- Parse songs data with encoded notes/chords
+    songs = parse_data(hnn_data=False)
+
+    num_songs = len(songs)
+
+    # -- Initialize empty total probability distributions
+    prob_chord_tones = torch.zeros(12, dtype=torch.float32)
+    prob_scale_tones = torch.zeros(12, dtype=torch.float32)
+    prob_diss_tones = torch.zeros(12, dtype=torch.float32)
+
+    # -- Count songs without dissonant tones
+    no_diss_count = 0
+
+    for song in songs:
+        # -- Extract song's notes and chords
+        notes = song['notes']
+        chords = song['chords']
+
+        # -- Establish note to histogram bin mapping
+        note_indices = {
+            'A' : 0,
+            'A#': 1,
+            'B' : 2,
+            'C' : 3,
+            'C#': 4,
+            'D' : 5,
+            'D#': 6,
+            'E' : 7,
+            'F' : 8,
+            'F#': 9,
+            'G' : 10,
+            'G#': 11
+        }
+
+        # -- Initialize empty histograms
+        chord_tones = torch.zeros(12, dtype=torch.float32)
+        scale_tones = torch.zeros(12, dtype=torch.float32)
+        diss_tones = torch.zeros(12, dtype=torch.float32)
+
+        #-- For each note, chord: Add count for level of dissonance
+        for note, chord in zip(notes, chords):
+
+            # Convert note/chord to strings
+            note = NOTE_ENC_TO_NOTE_STR_REF.get(note[:2])
+            chord = CHORD_ENC_TO_STR.get(chord)
+
+            # Ignore rests
+            if note == 'R':
+                continue
+
+            # Determine note index
+            note_idx = note_indices[note]
+
+            # -- Chord Tones
+            if note in CHORD_TONES.get(chord):
+                chord_tones[note_idx] += 1
+            
+            # -- Scale Non-Chord Tones
+            elif note in HARMONIZING_NOTES.get(chord):
+                scale_tones[note_idx] += 1
+
+            # -- Dissonant Tones
+            else:
+                diss_tones[note_idx] += 1
+
+        # -- Sort histograms
+        chord_tones = chord_tones.sort(descending=True)[0]
+        scale_tones = scale_tones.sort(descending=True)[0]
+        diss_tones = diss_tones.sort(descending=True)[0]
+
+        # -- Convert to probability distributions
+        total_chord_tones = torch.sum(chord_tones)
+        total_scale_tones = torch.sum(scale_tones)
+        total_diss_tones = torch.sum(diss_tones)
+
+        chord_tones /= total_chord_tones
+        scale_tones /= total_scale_tones
+        if total_diss_tones != 0:
+            diss_tones /= total_diss_tones
+        else:
+            no_diss_count += 1
+
+        # -- Add to total dataset probability distributions
+        prob_chord_tones += chord_tones
+        prob_scale_tones += scale_tones
+        prob_diss_tones += diss_tones
+
+    # -- Compute the average probability distributions
+    prob_chord_tones /= num_songs
+    prob_scale_tones /= num_songs
+    prob_diss_tones /= (num_songs - no_diss_count)
+
+    # -- Ensure probability distributions sum to 1
+    prob_chord_tones /= torch.sum(prob_chord_tones)
+    prob_scale_tones /= torch.sum(prob_scale_tones)
+    prob_diss_tones /= torch.sum(prob_diss_tones)
+
+    return prob_chord_tones, prob_scale_tones, prob_diss_tones
+
+
+def save_distributions():
+    chord_tones, scale_tones, diss_tones = note_distributions()
+
+    # -- Plot distributions of levels of dissonance
+    chord_tones = chord_tones.cpu().numpy()
+    scale_tones = scale_tones.cpu().numpy()
+    diss_tones = diss_tones.cpu().numpy()
+
+    x = np.arange(12)
+
+    fig, axs = plt.subplots(3, figsize=(8, 10))
+
+    axs[0].bar(x, chord_tones)
+    axs[1].bar(x, scale_tones)
+    axs[2].bar(x, diss_tones)
+
+    axs[0].set_title('Chord Tones')
+    axs[1].set_title('Scale Non-Chord Tones')
+    axs[2].set_title('Dissonant Tones')
+
+    axs[0].set_ylim(0, 1)
+    axs[1].set_ylim(0, 1)
+    axs[2].set_ylim(0, 1)
+
+    fig.tight_layout()
+    fig.savefig('dataset_dists.png')
+
+    # -- Compute entropy of each distribution
+    chord_tones_H = entropy(chord_tones)
+    scale_tones_H = entropy(scale_tones)
+    diss_tones_H = entropy(diss_tones)
+
+    print(f"H(chord): {chord_tones_H}, H(scale): {scale_tones_H}, H(diss): {diss_tones_H}")
+
+    # -- Write distribution/entropy information to csvs
+    dists = {
+        'Chord': chord_tones,
+        'Scale': scale_tones,
+        'Dissonant': diss_tones,
+    }
+
+    df = pd.DataFrame(dists)
+    df.to_csv('dataset_dists.csv', index=False)
+
+    entropies = {
+        'Chord': [chord_tones_H],
+        'Scale': [scale_tones_H],
+        'Dissonant': [diss_tones_H]
+    }
+
+    df = pd.DataFrame(entropies)
+    df.to_csv('dataset_entropies.csv', index=False)    
+
+
+

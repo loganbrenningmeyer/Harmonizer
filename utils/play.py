@@ -6,6 +6,7 @@ import time
 
 from utils.data.mappings import *
 from utils.data.load_data import get_songs_notes, get_songs_chords, parse_data
+from utils.data.distributions import get_label_feature
 
 # -- Define constants for playback
 SAMPLE_RATE = 44100
@@ -107,6 +108,111 @@ def play_comp(notes, chord, note_duration: int = NOTE_DURATION):
             time.sleep(note_duration)
     else:
         time.sleep(note_duration)
+
+
+def play_song_mnetRL(model_path: str, song_idx: int, note_duration: float):
+    # -- Initialize Pygame mixer
+    pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
+    pygame.mixer.init()
+    clock = pygame.time.Clock()
+
+    print(f"\n-------- model: {model_path}, song_idx: {song_idx} --------\n")
+
+    # -- Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # -- Load MelodyNet model in eval mode
+    mnetRL = torch.load(model_path, map_location=device)
+    mnetRL.eval()
+
+    # -- Get key/chord encodings of specified song_idx
+    song_data = parse_data(hnn_data=False)[song_idx]
+    song_chords = song_data['chords']
+    song_key = song_data['key']
+    # song_chords = get_songs_chords()[song_idx]
+
+    print(f"Song Length: {len(song_chords)}")
+    print(f"Song Key: {song_key}, Notes: {KEY_NOTES.get(song_key)}")
+
+    # -- Initialize chord one-hot encoding arrays to index from
+    chord_one_hot_array = torch.eye(mnetRL.chord_size, dtype=int)
+
+    '''
+    Initialize State Units with 'no-note' token to represent an empty
+    note context
+
+    RL: State Units and Timestep updated based on [Model Actions]
+    '''
+    no_note_token = mnetRL.vocab_size                            # Index 459, outside of class indices [0, 458]
+    past_notes = torch.full((mnetRL.n_past_notes,), 
+                            no_note_token,
+                            dtype=torch.long).to(device)        # Array of the n past class indices
+    
+    state_units = mnetRL.embedding_layer(past_notes).view(-1).unsqueeze(0)    # Shape: [n_past_notes * embedding_dim] = [8 * 32]
+
+    current_chord_str = None
+
+    timestep = 0
+
+    while timestep < len(song_chords):
+        # Get one-hot encoding chord index
+        chord_enc = song_chords[timestep]
+        # chord_idx = 7 * NOTE_ENC_TO_IDX_REF.get(chord[:2]) + int(chord[2])
+        chord_str = CHORD_ENC_TO_STR.get(chord_enc)
+        chord_idx = CHORD_STR_TO_IDX_MNET.get(chord_str)
+
+        # Obtain chord input as one-hot encoding
+        input_t = chord_one_hot_array[chord_idx].unsqueeze(0).float()
+
+        # Determine meter units
+        meter_units = F.one_hot(torch.arange(mnetRL.meter_size, dtype=torch.long))[timestep % mnetRL.meter_size].to(device)     # [1, 0] on 1st beat, [0, 1] on 3rd beat
+        meter_units = meter_units.expand((1, mnetRL.meter_size))
+
+        # print(f"{state_units.shape}, {input_t.shape}, {meter_units.shape}")
+        inputs = torch.cat([state_units, input_t, meter_units], dim=1)
+
+        # Forward pass
+        output = mnetRL(inputs)
+
+        # Take highest output class as [Model Action] a_t
+        a_t = np.argmax(output.detach().squeeze(0))
+
+        '''
+        RL: State Units updated based on [Model Action] a_t
+        '''
+        past_notes = torch.cat([past_notes[1:], a_t.view(-1)], dim=0)  # Shift and append
+        state_units = mnetRL.embedding_layer(past_notes).view(-1).unsqueeze(0)  # Shape: [n_past_notes * embedding_dim]
+
+        # -- Obtain duration from sampled action
+        note_dur = get_label_feature(a_t.item(), 'durations')
+
+        '''
+        RL: Timestep updated based on [Model Action] duration
+        '''
+        timestep += note_dur
+
+        # -- Get note string
+        note = get_label_feature(a_t.item(), 'notes')
+        octave = get_label_feature(a_t.item(), 'octaves')
+
+        if note == 'R':
+            note_str = None
+        else:
+            note_str = note + str(octave)
+
+        print(f"chord: {chord_str}, note: {note_str}, duration: {note_dur}, in_key: {note in KEY_NOTES.get(song_key)}, harmonizes: {note in HARMONIZING_NOTES.get(chord_str)}")
+
+        # Play chord when it changes
+        if chord_str != current_chord_str:
+            play_chord(chord_str, chord_duration=8 * note_duration)
+            current_chord_str = chord_str
+
+        if note_str is not None:
+            play_note(note_str, note_dur * note_duration)
+        
+        # clock.tick(1 / (2 ** note_lifespan * note_duration))
+        time.sleep(note_dur * note_duration)
+
 
 
 def play_song_mnet(model_path: str, song_idx: int, note_duration: float,

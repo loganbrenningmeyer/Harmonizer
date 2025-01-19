@@ -11,12 +11,14 @@ from tqdm import tqdm
 
 from models.hnn import HNN
 from models.mnet import MelodyNet
+from models.mnetRL import MelodyNetRL
 
 from utils.data.load_data import *
 from utils.data.distributions import *
 from utils.compare_models import compare_plots
 
-from utils.experiment import train, test
+from utils.experiment import train, test, train_mnetRL, test_mnetRL, eval_heuristics
+from quality import M_idx_to_enc, C_idx_to_enc, plot_model_comparison
 
 from collections import Counter
 
@@ -228,14 +230,14 @@ def mnet_main():
     '''
     Create MelodyNet Model
     '''
-    mnet = MelodyNet(hidden1_size=1024, lr=0.05, weight_decay=0.0, 
-                     repetition_loss=500.0, key_loss=500.0, harmony_loss=750.0,
-                     chord_weight=10.0, melody_weight=15.0, state_units_decay=0.5, 
-                     fixed_chords=False, fixed_melody=False,
-                     rest_fixed_weight=0.25, rest_loss_weight=0.0,
+    mnet = MelodyNet(hidden1_size=512, lr=0.001, weight_decay=0.0, 
+                     repetition_loss=500.0, key_loss=0.0, harmony_loss=0.0,
+                     chord_weight=5.0, melody_weight=5.0, state_units_decay=0.5, 
+                     fixed_chords=True, fixed_melody=True,
+                     rest_fixed_weight=0.2, rest_loss_weight=1.0,
                      inject_noise=False, noise_size=100, noise_weight=1.0,
                      temperature=10.0, dropout_rate=0.5,
-                     model_name='med_loss_no_fixed')
+                     model_name='med_weights_comp')
 
     # -- Put model on device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -296,7 +298,7 @@ def mnet_main():
 
     print(f"\n-- Training {mnet.model_name}...\n")
 
-    epochs = 5
+    epochs = 1
     for epoch in range(1, epochs + 1):
         # -- Train for an epoch and store epoch loss
         epoch_loss = train(mnet, train_dataloader, train_song_keys, criterion, optimizer, device)
@@ -403,6 +405,96 @@ def mnet_main():
     plt.savefig(f'{figs_dir}/train_test_loss_accuracy.png')
     plt.close()
 
+
+
+def mnetRL_main():
+    balance_feature = 'notes_octaves'
+
+    SL_train_dataloader, SL_test_dataloader, _, _ = create_dataloaders_mnet(subset=1, balance_feature=balance_feature)     # Note-by-note
+    RL_train_dataloader, RL_test_dataloader = create_dataloaders_mnetRL(subset=1)   # All 16th-beat timesteps
+
+    '''
+    Create MelodyNetRL model
+    '''
+    heuristic_params = {
+        'Q_h': {'P_chord': 0, 'P_scale': 2, 'P_diss': 8},
+        'Q_s': {'w_Comp': 0.2, 'w_RR_I': 0.2, 'w_RR_D': 0.2, 'w_H_I': 0.2, 'w_H_D': 0.2, 'RR_I_thresh': 0.8, 'sigma': 3.0},
+        'Q_b': {'w_chord': 0.34, 'w_scale': 0.33, 'w_diss': 0.33},
+        'Q_f': {'P_unison': 10, 'P_stepwise': 1, 'P_conjunct': 2, 'P_disjunct': 8},
+        'Q_M': {'w_h': 0.4, 'w_s': 0.2, 'w_b': 0.2, 'w_f': 0.2}
+    }
+
+    mnetRL = MelodyNetRL(hidden1_size=1024, lr=0.0005, weight_decay=0.0,
+                         chord_weight=10.0, melody_weight=15.0, rest_fixed_weight=0.25,
+                         fixed_chords=True, fixed_melody=True, dropout_rate=0.0, 
+                         reward_weight=10, heuristic_params=heuristic_params,
+                         model_name="adam_high_flow")
+    
+    # -- Put model on device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    mnetRL.to(device)
+
+    # -- Define criterion/optimizer
+    criterion = nn.CrossEntropyLoss()       # For Supervised Stage Only
+    optimizer = torch.optim.Adam(mnetRL.parameters(), lr=0.001, weight_decay=mnetRL.weight_decay)
+    # optimizer = opt.SGD(mnetRL.parameters(), 
+    #                     lr=mnetRL.lr, 
+    #                     momentum=0.0, 
+    #                     weight_decay=mnetRL.weight_decay)
+    
+    '''
+    Store Params/Create Save Directories
+    '''
+    # -- Create model weights dir/model figs dir
+    weights_dir = f'saved_models/mnetRL/{mnetRL.model_name}/weights'
+    figs_dir = f'saved_models/mnetRL/{mnetRL.model_name}/figs'
+    os.makedirs(weights_dir, exist_ok=True)
+    os.makedirs(figs_dir, exist_ok=True)
+
+    params = {
+        'hidden1_size': mnetRL.hidden1_size,
+        'lr': mnetRL.lr,
+        'weight_decay': mnetRL.weight_decay,
+        'chord_weight': mnetRL.chord_weight,
+        'melody_weight': mnetRL.melody_weight,
+        'rest_fixed_weight': mnetRL.rest_fixed_weight,
+        'fixed_chords': mnetRL.fixed_chords,
+        'fixed_melody': mnetRL.fixed_melody,
+        'dropout_rate': mnetRL.dropout_rate,
+        'balance_feature': balance_feature
+    }
+
+    # -- Write heuristic parameters to csv
+    heuristic_params_flat = {f"{key1}_{key2}": value for key1, value1 in heuristic_params.items() for key2, value in value1.items()}
+    params.update(heuristic_params_flat)
+
+    df = pd.DataFrame(list(params.items()), columns=['Parameter', 'Value'])
+    df.to_csv(f'saved_models/mnetRL/{mnetRL.model_name}/params.csv', index=False, header=True)
+    print(f"Saved {mnetRL.model_name} params.csv to saved_models/mnetRL/{mnetRL.model_name}/params.csv.")
+
+    '''
+    Training/Testing
+    '''
+    print(f"\n-- Training {mnetRL.model_name}...\n")
+
+    epochs = 1
+    for epoch in range(1, epochs + 1):
+        SL_epoch_loss, RL_epoch_reward = train_mnetRL(model=mnetRL,
+                                                      SL_dataloader=SL_train_dataloader,
+                                                      RL_dataloader=RL_train_dataloader,
+                                                      criterion=criterion,
+                                                      optimizer=optimizer,
+                                                      device=device)
+        print(f"-- Epoch {epoch}/{epochs}, Loss: {SL_epoch_loss:.4f}, Reward: {RL_epoch_reward:.4f}")
+
+        # -- Save trained model every epoch
+        torch.save(mnetRL, f'{weights_dir}/epoch{epoch}.pth')
+        print(f"Saved {mnetRL.model_name} epoch{epoch}.pth to {weights_dir}/epoch{epoch}.pth.")
+
+
+
+
+
 # pattern = re.compile(r'^(R|[A-G]#?)(\d+)(\d+)$')
 
 # note_order = ['R', 'A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#']
@@ -428,7 +520,44 @@ def mnet_main():
 
 
 if __name__ == "__main__":
-    mnet_main()
+
+    model_paths = ['saved_models/mnet/notes_octaves_balance_high_mel_rep_low_lr',
+                   'saved_models/mnet/both_chords_melody_low_lr',
+                   'saved_models/mnet/why_not_take2_full']
+    
+    # for model_path in model_paths:
+    #     model = torch.load(os.path.join(model_path, 'weights/epoch1.pth'))
+    #     train_dataloader, test_dataloader = create_dataloaders_mnetRL(shuffle=False)
+    #     eval_heuristics(model, train_dataloader, test_dataloader)
+        
+    plot_model_comparison(model_paths, output_dir='figs/plot_test')
+    # # mnetRL_main()
+    # heuristic_params = {
+    #     'Q_h': {'P_chord': 0, 'P_scale': 2, 'P_diss': 8},
+    #     'Q_s': {'w_Comp': 0.2, 'w_RR_I': 0.2, 'w_RR_D': 0.2, 'w_H_I': 0.2, 'w_H_D': 0.2, 'RR_I_thresh': 0.8, 'sigma': 3.0},
+    #     'Q_b': {'w_chord': 0.34, 'w_scale': 0.33, 'w_diss': 0.33},
+    #     'Q_f': {'P_unison': 5, 'P_stepwise': 1, 'P_conjunct': 2, 'P_disjunct': 3},
+    #     'Q_M': {'w_h': 0.4, 'w_s': 0.2, 'w_b': 0.2, 'w_f': 0.2}
+    # }
+   
+    # # mnet_main()
+    # mnet = torch.load('saved_models/mnet/low_weights_comp/weights/epoch1.pth')
+    # RL_train_dataloader, RL_test_dataloader = create_dataloaders_mnetRL(subset=1, shuffle=False)   # All 16th-beat timesteps
+
+    # eval_heuristics_mnet(mnet, RL_train_dataloader, heuristic_params)
+    
+    # M_indices = [50, 1, 2]
+    # C_indices = [0, 1, 2]
+    # M = M_idx_to_enc(M_indices)
+    # C = C_idx_to_enc(C_indices)
+
+    # print(M)
+    # print(C)
+
+    # num_chord_classes = 84
+    # chord_one_hot = torch.from_numpy(np.eye(num_chord_classes, dtype=int))[0]
+
+    # print(torch.argmax(chord_one_hot).item())
     # parse_data(hnn_data=False)
 
     # compare_plots()

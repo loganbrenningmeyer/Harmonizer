@@ -1,6 +1,6 @@
 from models.hnn import HNN
 from models.mnet import MelodyNet
-from utils.play import play_song_hnn, play_song_mnet
+from utils.play import play_song_hnn, play_song_mnet, play_song_mnetRL
 import random
 
 NOTE_DURATION_HNN = 0.75
@@ -162,14 +162,34 @@ def mnet_main():
     song_idx = random.randint(0, 5166)
 
     play_song_mnet(
-        model_path=no_key_no_decay,
-        song_idx=1683,
+        model_path=low_weights,
+        song_idx=song_idx,
         note_duration=NOTE_DURATION_MNET,
         topk=0,
         multinomial=False
     )
 
+
+def mnetRL_main():
+
+    MelodyNetRL_0 = 'saved_models/mnetRL/MelodyNetRL_0/weights/epoch1.pth'
+
+    SL_MelodyNetRL_balance = 'saved_models/mnetRL/SL_MelodyNetRL_balance/weights/epoch1.pth'
+    MelodyNetRL_balance = 'saved_models/mnetRL/MelodyNetRL_balance/weights/epoch1.pth'
+
+    SL_MelodyNetRL_reward = 'saved_models/mnetRL/SL_MelodyNetRL_reward/weights/epoch1.pth'
+    MelodyNetRL_reward = 'saved_models/mnetRL/MelodyNetRL_reward/weights/epoch1.pth'
+
+
+    song_idx = random.randint(0, 5166)
+
+    play_song_mnetRL(
+        model_path=SL_MelodyNetRL_reward,
+        song_idx=4731,
+        note_duration=NOTE_DURATION_MNET
+    )
+
     
 if __name__ == "__main__":
     # hnn_main()
-    mnet_main()
+    mnetRL_main()
